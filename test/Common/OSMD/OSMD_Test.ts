@@ -339,6 +339,142 @@ describe("OpenSheetMusicDisplay Main Export", () => {
         });
     });
 
+    it("centers whole-measure rests even when other staves contain active notes", () => {
+        const xml: string = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Solo</part-name>
+    </score-part>
+    <score-part id="P2">
+      <part-name>Piano</part-name>
+      <part-abbreviation>Pno.</part-abbreviation>
+      <score-instrument id="P2-I1"><instrument-name>Piano</instrument-name></score-instrument>
+      <midi-instrument id="P2-I1"><midi-channel>1</midi-channel><midi-program>1</midi-program></midi-instrument>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef>
+      </attributes>
+      <note>
+        <rest measure="yes"/>
+        <duration>4</duration>
+        <voice>1</voice>
+        <type>whole</type>
+        <staff>1</staff>
+      </note>
+      <backup><duration>4</duration></backup>
+      <forward><duration>4</duration></forward>
+    </measure>
+  </part>
+  <part id="P2">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>C</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <backup><duration>1</duration></backup>
+      <note>
+        <pitch><step>C</step><octave>3</octave></pitch>
+        <duration>1</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <forward><duration>1</duration></forward>
+      <note>
+        <pitch><step>D</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <backup><duration>1</duration></backup>
+      <note>
+        <pitch><step>D</step><octave>3</octave></pitch>
+        <duration>1</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <forward><duration>1</duration></forward>
+      <note>
+        <pitch><step>E</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <backup><duration>1</duration></backup>
+      <note>
+        <pitch><step>E</step><octave>3</octave></pitch>
+        <duration>1</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <forward><duration>1</duration></forward>
+      <note>
+        <pitch><step>F</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <backup><duration>1</duration></backup>
+      <note>
+        <pitch><step>F</step><octave>3</octave></pitch>
+        <duration>1</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>`;
+        const div: HTMLElement = TestUtils.getDivElement(document);
+        const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(div);
+
+        function wholeMeasureRestMetrics(currentOsmd: OpenSheetMusicDisplay): { duration: string, centerOffset: number } {
+            const wholeMeasureRest: any = currentOsmd.GraphicSheet.MeasureList
+                .flatMap((measureList: any[]) => measureList)
+                .flatMap((measure: any) => measure.staffEntries)
+                .flatMap((staffEntry: any) => staffEntry.graphicalVoiceEntries)
+                .find((gve: any) => {
+                    const sourceNote: any = gve.notes?.[0]?.sourceNote;
+                    return sourceNote?.isRest?.() && (
+                        sourceNote.IsWholeMeasureRest ||
+                        sourceNote.Length.RealValue === sourceNote.SourceMeasure.ActiveTimeSignature.RealValue
+                    );
+                });
+            expect(wholeMeasureRest, "expected a whole-measure rest").to.not.equal(undefined);
+            const vfStaveNote: any = wholeMeasureRest.vfStaveNote;
+            const boundingBox: any = vfStaveNote.getBoundingBox();
+            const stave: any = vfStaveNote.getStave();
+            const restCenterX: number = boundingBox.getX() + boundingBox.getW() / 2;
+            const measureCenterX: number = (stave.getNoteStartX() + stave.getNoteEndX()) / 2;
+            return {
+                centerOffset: Math.abs(restCenterX - measureCenterX),
+                duration: vfStaveNote.getDuration(),
+            };
+        }
+
+        return osmd.load(xml).then(() => {
+            osmd.render();
+            const metrics: { duration: string, centerOffset: number } = wholeMeasureRestMetrics(osmd);
+            expect(metrics.duration).to.equal("1");
+            expect(metrics.centerOffset).to.be.lessThan(15);
+        });
+    });
+
     it.skip("Timeout from server", (done: Mocha.Done) => {
         // TODO this test times out from time to time, even with osmd.loadUrlTimeout set to 5000.
         //   the test is unreliable, which makes it hard to test.
