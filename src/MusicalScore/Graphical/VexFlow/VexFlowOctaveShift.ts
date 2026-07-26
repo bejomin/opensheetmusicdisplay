@@ -1,5 +1,4 @@
-import Vex from "vexflow";
-import VF = Vex.Flow;
+import * as VF from "vexflow";
 import { GraphicalOctaveShift } from "../GraphicalOctaveShift";
 import { OctaveShift, OctaveEnum } from "../../VoiceData/Expressions/ContinuousExpressions/OctaveShift";
 import { BoundingBox } from "../BoundingBox";
@@ -18,7 +17,7 @@ export class VexFlowOctaveShift extends GraphicalOctaveShift {
     /** Defines the note where the octave shift ends */
     public endNote: VF.StemmableNote;
     /** Top or bottom of the staffline */
-    private position: VF.TextBracket.Positions;
+    private position: number;
     /** Supscript is a smaller text after the regular text (e.g. va after 8) */
     private supscript: string;
     /** Main text element */
@@ -33,22 +32,22 @@ export class VexFlowOctaveShift extends GraphicalOctaveShift {
         super(octaveShift, parent);
         switch (octaveShift.Type) {
             case OctaveEnum.VA8:
-                this.position = VF.TextBracket.Positions.TOP;
+                this.position = VF.TextBracket.Position.TOP;
                 this.supscript = "va";
                 this.text = "8";
                 break;
             case OctaveEnum.MA15:
-                this.position = VF.TextBracket.Positions.TOP;
+                this.position = VF.TextBracket.Position.TOP;
                 this.supscript = "ma";
                 this.text = "15";
                 break;
             case OctaveEnum.VB8:
-                this.position = VF.TextBracket.Positions.BOTTOM;
+                this.position = VF.TextBracket.Position.BOTTOM;
                 this.supscript = "vb";
                 this.text = "8";
                 break;
             case OctaveEnum.MB15:
-                this.position = VF.TextBracket.Positions.BOTTOM;
+                this.position = VF.TextBracket.Position.BOTTOM;
                 this.supscript = "mb";
                 this.text = "15";
                 break;
@@ -117,6 +116,9 @@ export class VexFlowOctaveShift extends GraphicalOctaveShift {
                 getAbsoluteX(): number {
                     return (self.endMeasure.PositionAndShape.AbsolutePosition.x + self.endMeasure.PositionAndShape.Size.width) * 10;
                 },
+                getGlyphWidth(): number {
+                    return 0;
+                },
                 getGlyph(): Object {
                     return {
                         getWidth(): number {
@@ -138,7 +140,7 @@ export class VexFlowOctaveShift extends GraphicalOctaveShift {
         });
         if (this.endsOnDifferentStaffLine) {
             // make bracket open-ended (--- instead of ---|) if not ending on current staffline
-            (vfBracket as any).render_options.show_bracket = false;
+            vfBracket.renderOptions.showBracket = false;
         }
         return vfBracket;
     }
