@@ -555,9 +555,11 @@ export abstract class MusicSheetCalculator {
         graphicalLabel.PositionAndShape.Parent = musicSystem.PositionAndShape;
 
         // calculate relative Position
+        const labelCenterOffset: number =
+            (graphicalLabel.PositionAndShape.BorderLeft + graphicalLabel.PositionAndShape.BorderRight) / 2;
         const relativeX: number = staffLine.PositionAndShape.RelativePosition.x +
-            measure.PositionAndShape.RelativePosition.x - graphicalLabel.PositionAndShape.BorderMarginLeft +
-            labelOffsetX;
+            measure.PositionAndShape.RelativePosition.x +
+            labelOffsetX - labelCenterOffset;
         let relativeY: number;
 
         // and the corresponding SkyLine indices
