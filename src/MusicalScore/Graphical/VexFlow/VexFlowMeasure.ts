@@ -814,6 +814,7 @@ export class VexFlowMeasure extends GraphicalMeasure {
             // set the width of the voices to the current measure width:
             // (The width of the voices does not include the instructions (StaveModifiers))
             this.formatVoices((this.PositionAndShape.Size.width - this.beginInstructionsWidth - this.endInstructionsWidth) * unitInPixels, this);
+            this.setStemDirectionFromVexFlow();
         }
 
         // this.correctNotePositions(); // now done at the end of draw()

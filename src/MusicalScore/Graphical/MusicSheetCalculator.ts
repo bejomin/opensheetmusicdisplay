@@ -2223,8 +2223,10 @@ export abstract class MusicSheetCalculator {
                                octaveShiftValue: OctaveEnum, staffIndex: number,
                                linkedNotes: Note[] = undefined,
                                sourceStaffEntry: SourceStaffEntry = undefined): OctaveEnum {
+        const transposeHalftones: number = graphicalStaffEntry.parentMeasure.getTransposedHalftones();
         if (voiceEntry.StemDirectionXml !== StemDirectionType.Undefined &&
             this.rules.SetWantedStemDirectionByXml &&
+            transposeHalftones === 0 &&
             voiceEntry.StemDirectionXml !== undefined) {
                 voiceEntry.WantedStemDirection = voiceEntry.StemDirectionXml;
         } else {
@@ -4067,6 +4069,7 @@ export abstract class MusicSheetCalculator {
      * @param voiceEntry the voiceEntry for which the stem direction has to be calculated
      */
     private calculateStemDirectionFromVoices(voiceEntry: VoiceEntry): void {
+        voiceEntry.WantedStemDirection = StemDirectionType.Undefined;
         // Stem direction calculation:
         const hasLink: boolean = voiceEntry.ParentSourceStaffEntry.Link !== undefined;
         if (hasLink) {
