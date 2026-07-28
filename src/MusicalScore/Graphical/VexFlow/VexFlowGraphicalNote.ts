@@ -123,7 +123,7 @@ export class VexFlowGraphicalNote extends GraphicalNote {
         if (!isFinite(noteStemX)) {
             return 0;
         }
-        const durations: string[] = ["4", "8", "16", "32", "64", "128", "256", "512", "1024"];
+        const durations: string[] = ["4", "8", "16", "32", "64"];
         let count: number = 0;
         for (const duration of durations) {
             const beamLines: { start?: number }[] | undefined = beam.getBeamLines?.(duration);
