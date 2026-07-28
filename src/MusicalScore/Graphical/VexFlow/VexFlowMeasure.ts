@@ -37,10 +37,20 @@ import { Arpeggio } from "../../VoiceData/Arpeggio";
 import { GraphicalTie } from "../GraphicalTie";
 import { Note } from "../../VoiceData/Note";
 import { TabNote } from "../../VoiceData/TabNote";
+import { getDoricoDefaultTextFontFamily } from "../DoricoTextFontRouting";
 
 const DOUBLE_HEAVY_BARLINE_TYPE: number = 8;
 
 // type StemmableNote = VF.StemmableNote;
+
+function formatVoltaRange(startIndex: number, endIndex: number): string {
+    return startIndex === endIndex ? `${startIndex}` : `${startIndex}\u2013${endIndex}`;
+}
+
+type FontAssignableModifier = {
+    getCategory?: () => string;
+    setFont?: (font: { family?: string }) => unknown;
+};
 
 type BeamRenderOptionsCompat = {
     beamWidth?: number;
@@ -101,6 +111,32 @@ function installRepetitionCompatibilityAliases(repetition: VF.Repetition): void 
 
     syncCompatibilityFields();
 }
+
+function formatVoltaLabel(endingIndices: number[] = []): string {
+    if (!endingIndices.length) {
+        return "";
+    }
+
+    const labelParts: string[] = [];
+    let rangeStartIndex: number = endingIndices[0];
+    let previousIndex: number = endingIndices[0];
+
+    for (let index: number = 1; index < endingIndices.length; index++) {
+        const currentIndex: number = endingIndices[index];
+        if (currentIndex === previousIndex + 1) {
+            previousIndex = currentIndex;
+            continue;
+        }
+
+        labelParts.push(formatVoltaRange(rangeStartIndex, previousIndex));
+        rangeStartIndex = currentIndex;
+        previousIndex = currentIndex;
+    }
+
+    labelParts.push(formatVoltaRange(rangeStartIndex, previousIndex));
+    return `${labelParts.join(", ")}.`;
+}
+
 export class VexFlowMeasure extends GraphicalMeasure {
     constructor(staff: Staff, sourceMeasure?: SourceMeasure, staffLine?: StaffLine) {
         super(staff, sourceMeasure, staffLine);
@@ -174,6 +210,7 @@ export class VexFlowMeasure extends GraphicalMeasure {
             spaceBelowStaffLn: 0
         });
         this.stave.setStyle({ fillStyle: this.rules.StaffLineColor, strokeStyle: this.rules.StaffLineColor });
+        (this.stave as any).setFont?.({ family: getDoricoDefaultTextFontFamily(this.rules) });
         if (this.InitiallyActiveClef) {
             (this.stave as any).clef = VexFlowConverter.Clef(this.InitiallyActiveClef).type;
             // Vexflow sets stave.clef to treble by default. It needs this info e.g. for key signature accidentals on new key sig
@@ -340,7 +377,7 @@ export class VexFlowMeasure extends GraphicalMeasure {
                     // instead of not rendering the key signature, technically, we render it, but with transparent color. this helps layout / x-alignment.
 
                     // SVG compatibility: also set visibility="hidden".
-                    //   this helps make the key invisible instead of black in some systems like apps, outside the browser. (VexFlowPatch)
+                    //   this helps make the key invisible instead of black in some systems like apps, outside the browser.
                     (modifier as any).hidden = true;
                     break;
                 }
@@ -373,7 +410,7 @@ export class VexFlowMeasure extends GraphicalMeasure {
             // instead of not rendering the time signature, technically, we render it, but with transparent color. this helps layout / x-alignment.
 
             // SVG compatibility: also set visibility="hidden".
-            //   this helps make the modifier invisible instead of black in some systems like apps, outside the browser. (VexFlowPatch)
+            //   this helps make the modifier invisible instead of black in some systems like apps, outside the browser.
             (timeSig as any).hidden = true;
         }
         this.updateInstructionWidth();
@@ -575,6 +612,7 @@ export class VexFlowMeasure extends GraphicalMeasure {
         if (instruction) {
             const repetition: VF.Repetition = new VF.Repetition(instruction, xShift, -this.rules.RepetitionSymbolsYOffset);
             installRepetitionCompatibilityAliases(repetition);
+            (repetition as any).setFont?.({ family: getDoricoDefaultTextFontFamily(this.rules) });
             const stafflineMeasures: GraphicalMeasure[] = this.ParentStaffLine?.Measures;
             if (!stafflineMeasures || stafflineMeasures[stafflineMeasures.length - 1] === this) {
                 // only shift end instructions like Fine to the right in the last measure of the staffline,
@@ -692,7 +730,19 @@ export class VexFlowMeasure extends GraphicalMeasure {
 
             //convert to VF units (pixels)
             vexFlowVoltaHeight *= 10;
-            this.stave.setVoltaType(voltaType, repetitionInstruction.endingIndices[0], vexFlowVoltaHeight);
+            const voltaLabel: string = formatVoltaLabel(repetitionInstruction.endingIndices);
+            // VexFlow's runtime Volta modifier accepts string labels, but the vendored type definition still narrows this to number.
+            this.stave.setVoltaType(voltaType, voltaLabel, vexFlowVoltaHeight);
+            const modifiers: FontAssignableModifier[] =
+                ((this.stave as any).modifiers as FontAssignableModifier[]) || [];
+            const voltaModifier: FontAssignableModifier | undefined = [...modifiers]
+                .reverse()
+                .find((modifier) => {
+                    const category: string = modifier.getCategory?.();
+                    return category === "voltas" || category === "Volta";
+                });
+            (voltaModifier as any).number = voltaLabel;
+            voltaModifier?.setFont?.({ family: getDoricoDefaultTextFontFamily(this.rules) });
             skyBottomLineCalculator.updateSkyLineInRange(start, end, newSkylineValueForMeasure);
         }
     }
@@ -731,6 +781,7 @@ export class VexFlowMeasure extends GraphicalMeasure {
 
         // Draw stave lines
         this.stave.setContext(ctx).draw();
+        this.centerWholeMeasureRests();
         // Draw all voices
         for (const voiceID in this.vfVoices) {
             if (this.vfVoices.hasOwnProperty(voiceID)) {
@@ -814,9 +865,29 @@ export class VexFlowMeasure extends GraphicalMeasure {
             // set the width of the voices to the current measure width:
             // (The width of the voices does not include the instructions (StaveModifiers))
             this.formatVoices((this.PositionAndShape.Size.width - this.beginInstructionsWidth - this.endInstructionsWidth) * unitInPixels, this);
+            this.centerWholeMeasureRests();
+            this.setStemDirectionFromVexFlow();
         }
 
         // this.correctNotePositions(); // now done at the end of draw()
+    }
+
+    private centerWholeMeasureRests(): void {
+        for (const staffEntry of this.staffEntries as VexFlowStaffEntry[]) {
+            for (const voiceEntry of staffEntry.graphicalVoiceEntries as VexFlowVoiceEntry[]) {
+                const sourceNote: Note = voiceEntry.notes[0]?.sourceNote;
+                const vexNote: any = voiceEntry.vfStaveNote as any;
+                if (!sourceNote?.isRest?.() || !vexNote?.getStave) {
+                    continue;
+                }
+                const isWholeMeasureRest: boolean = sourceNote.IsWholeMeasureRest ||
+                    sourceNote.isWholeRest();
+                if (!isWholeMeasureRest) {
+                    continue;
+                }
+                vexNote.setCenterAlignment?.(true);
+            }
+        }
     }
 
     // correct position / bounding box (note.setIndex() needs to have been called)
@@ -1515,7 +1586,7 @@ export class VexFlowMeasure extends GraphicalMeasure {
                     const sourceNote: Note = voiceEntry.notes[0].sourceNote;
                     const graphicalLength: Fraction = voiceEntry.notes[0].graphicalNoteLength;
                     const vfTicks: VF.Fraction = vexFlowVoiceEntry.vfStaveNote.getTicks();
-                    // whole measure rests keep their vexflow "w" ticks: nothing follows them
+                    // whole measure rests keep their VexFlow whole-note ticks: nothing follows them
                     //   in the voice, and correcting them would change spacing unnecessarily.
                     const isWholeMeasureRest: boolean = sourceNote.IsWholeMeasureRest ||
                         graphicalLength.RealValue === this.parentSourceMeasure.ActiveTimeSignature.RealValue;
@@ -1648,7 +1719,9 @@ export class VexFlowMeasure extends GraphicalMeasure {
             const graphicalVoiceEntries: GraphicalVoiceEntry[] = graphicalStaffEntry.graphicalVoiceEntries;
             for (const gve of graphicalVoiceEntries) {
                 const vfStaveNote: StemmableNote = (gve as VexFlowVoiceEntry).vfStaveNote;
-                VexFlowConverter.generateArticulations(vfStaveNote, gve.notes[0], this.rules);
+                for (const graphicalNote of gve.notes) {
+                    VexFlowConverter.generateArticulations(vfStaveNote, graphicalNote, this.rules);
+                }
             }
         }
     }

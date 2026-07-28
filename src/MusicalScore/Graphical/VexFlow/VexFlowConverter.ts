@@ -24,6 +24,7 @@ import { Notehead, NoteHeadShape } from "../../VoiceData/Notehead";
 import { unitInPixels } from "./VexFlowMusicSheetDrawer";
 import { EngravingRules } from "../EngravingRules";
 import { Note, TremoloBetweenNotes, TremoloInfo } from "../../../MusicalScore/VoiceData/Note";
+import { Articulation } from "../../VoiceData/Articulation";
 import StaveNote = VF.StaveNote;
 import { ArpeggioType } from "../../VoiceData/Arpeggio";
 import { TabNote } from "../../VoiceData/TabNote";
@@ -39,6 +40,8 @@ import { Staff } from "../../VoiceData/Staff";
  * from OSMD objects to VexFlow objects.
  */
 export class VexFlowConverter {
+    private static readonly trebleLineNoteNames: string[] = ["c", "d", "e", "f", "g", "a", "b"];
+
     /**
      * Mapping from numbers of alterations on the key signature to major keys
      * @type {[alterationsNo: number]: string; }
@@ -154,22 +157,14 @@ export class VexFlowConverter {
      */
     public static pitch(pitch: Pitch, isRest: boolean, clef: ClefInstruction,
                         notehead: Notehead = undefined, octaveOffsetGiven: number = undefined): [string, string, ClefInstruction] {
+        if (isRest) {
+            return [VexFlowConverter.restPitch(pitch, clef), "", clef];
+        }
+
         //FIXME: The octave seems to need a shift of three?
-        //FIXME: Also rests seem to use different offsets depending on the clef.
         let octaveOffset: number = octaveOffsetGiven;
         if (octaveOffsetGiven === undefined) {
             octaveOffset = 3;
-        }
-        if (isRest && octaveOffsetGiven === undefined) {
-            octaveOffset = 0;
-            if (clef.ClefType === ClefEnum.F) {
-                octaveOffset = 2;
-            }
-            if (clef.ClefType === ClefEnum.C) {
-                octaveOffset = 2;
-            }
-            // TODO the pitch for rests will be the start position, for eights rests it will be the bottom point
-            // maybe we want to center on the display position instead of having the bottom there?
         }
         const fund: string = NoteEnum[pitch.FundamentalNote].toLowerCase();
         const acc: string = Pitch.accidentalVexflow(pitch.Accidental);
@@ -181,9 +176,18 @@ export class VexFlowConverter {
         return [fund + "n/" + octave + noteheadCode, acc, clef];
     }
 
+    private static restPitch(pitch: Pitch, clef: ClefInstruction): string {
+        const clefType: string = VexFlowConverter.Clef(clef).type || "treble";
+        const renderedPitch: string = `${NoteEnum[pitch.FundamentalNote].toLowerCase()}n/${pitch.Octave}`;
+        const sourceLine: number = (VexFlow as any).keyProperties(renderedPitch, clefType, "N", { octaveShift: 0 }).line;
+        const lineIndex: number = Math.round(sourceLine * 2) + 28;
+        const noteIndex: number = ((lineIndex % 7) + 7) % 7;
+        const octave: number = (lineIndex - noteIndex) / 7;
+        return `${VexFlowConverter.trebleLineNoteNames[noteIndex]}n/${octave}`;
+    }
+
     public static restToNotePitch(pitch: Pitch, clefType: ClefEnum): Pitch {
         let octave: number = pitch.Octave;
-        // offsets see pitch()
         switch (clefType) {
             case ClefEnum.C:
             case ClefEnum.F: {
@@ -341,14 +345,12 @@ export class VexFlowConverter {
                     if (gve.parentStaffEntry.parentMeasure.ParentStaff.StafflineCount === 1) {
                         keys = ["b/4"];
                     }
-                    duration = "w";
+                    duration = "1";
                     numDots = 0;
-                    // If it's a whole rest we want it smack in the middle. Apparently there is still an issue in vexflow:
-                    // https://github.com/0xfe/vexflow/issues/579 The author reports that he needs to add some negative x shift
-                    // if the measure has no modifiers.
+                    // Whole-measure rests need the VexFlow bar-rest duration so alignCenter
+                    // can place them in the visual middle of the bar.
                     alignCenter = true;
-                    xShift = rules.WholeRestXShiftVexflow * unitInPixels; // TODO find way to make dependent on the modifiers
-                    // affects VexFlowStaffEntry.calculateXPosition()
+                    xShift = 0;
                 }
                 //If we have more than one visible voice entry, shift the rests so no collision occurs
                 if (note.sourceNote.ParentStaff.Voices.length > 1) {
@@ -397,7 +399,7 @@ export class VexFlowConverter {
                                     //   this is more of "reverse engineering" or rather "advance engineering" the graphical notes,
                                     //   which are unfortunately not built/drawn yet here.
                                 }
-                                if (duration.includes("w")) {
+                                if (isWholeMeasureRest) {
                                     linesShift /= 2; // TODO maybe a different fix, whole notes may need another look
                                 }
                                 linesShift += (Math.ceil(rules.RestCollisionYPadding) * 0.5); // 0.5 is smallest unit
@@ -458,7 +460,7 @@ export class VexFlowConverter {
         let vfnote: VF.StaveNote;
         const vfnoteStruct: any = {
             alignCenter: alignCenter,
-            auto_stem: true,
+            autoStem: true,
             clef: vfClefType,
             duration: duration,
             keys: keys,
@@ -467,8 +469,8 @@ export class VexFlowConverter {
 
         const firstNote: Note = gve.notes[0].sourceNote;
         if (firstNote.IsCueNote) {
-            vfnoteStruct.glyph_font_scale = VexFlow.NOTATION_FONT_SCALE * 0.66;
-            vfnoteStruct.stroke_px = VF.GraceNote.LEDGER_LINE_OFFSET;
+            vfnoteStruct.glyphFontScale = VexFlow.NOTATION_FONT_SCALE * 0.66;
+            vfnoteStruct.strokePx = VF.GraceNote.LEDGER_LINE_OFFSET;
         }
 
         if (gve.parentVoiceEntry.IsGrace || gve.notes[0].sourceNote.IsCueNote) {
@@ -534,8 +536,8 @@ export class VexFlowConverter {
                 rules.LyricsUseXPaddingForLongLyrics &&
                 lyricsEntries.length > 0 &&
                 nextOrCloseNoteHasLyrics) {
-                // VexFlowPatch: add padding to the right for large lyrics,
-                //   so that measure doesn't need to be enlarged too much for spacing
+                // Add padding to the right for large lyrics so the measure doesn't need to be
+                // enlarged too much just for spacing.
 
                 let hasShortNotes: boolean = false;
                 let padding: number = 0;
@@ -670,7 +672,15 @@ export class VexFlowConverter {
                     vfnote.setStemDirection(VF.Stem.DOWN);
                     gve.parentVoiceEntry.StemDirection = StemDirectionType.Down;
                     break;
-                default:
+                default: {
+                    const autoStemDirection: number = vfnote.getStemDirection?.();
+                    if (autoStemDirection === VF.Stem.UP) {
+                        gve.parentVoiceEntry.StemDirection = StemDirectionType.Up;
+                    } else if (autoStemDirection === VF.Stem.DOWN) {
+                        gve.parentVoiceEntry.StemDirection = StemDirectionType.Down;
+                    }
+                    break;
+                }
             }
         }
 
@@ -753,7 +763,20 @@ export class VexFlowConverter {
             return;
         }
 
-        for (const articulation of gNote.sourceNote.ParentVoiceEntry.Articulations) {
+        const sourceNote: Note = gNote.sourceNote;
+        const vexFlowGraphicalNote: VexFlowGraphicalNote = gNote as VexFlowGraphicalNote;
+        const noteArticulations: Articulation[] = sourceNote.Articulations || [];
+        const voiceEntryArticulations: Articulation[] =
+            vexFlowGraphicalNote.vfnoteIndex === 0
+                ? sourceNote.ParentVoiceEntry.Articulations.filter((articulation) =>
+                    articulation.articulationEnum === ArticulationEnum.fermata ||
+                    articulation.articulationEnum === ArticulationEnum.invertedfermata
+                )
+                : [];
+        const articulations: Articulation[] = [...noteArticulations, ...voiceEntryArticulations];
+        const modifierIndex: number = vexFlowGraphicalNote.vfnoteIndex ?? 0;
+
+        for (const articulation of articulations) {
             let vfArtPosition: number = VF.Modifier.Position.ABOVE;
 
             if (vfnote.getStemDirection() === VF.Stem.UP) {
@@ -860,7 +883,6 @@ export class VexFlowConverter {
                 }
                 case ArticulationEnum.invertedfermata: {
                     const pve: VoiceEntry = gNote.sourceNote.ParentVoiceEntry;
-                    const sourceNote: Note = gNote.sourceNote;
                     // find inverted fermata, push it to last voice entry in staffentry list,
                     //   so that it doesn't overlap notes (gets displayed right below higher note)
                     //   TODO this could maybe be moved elsewhere or done more elegantly,
@@ -917,7 +939,7 @@ export class VexFlowConverter {
             }
             if (vfArt) {
                 vfArt.setPosition(vfArtPosition);
-                (vfnote as StaveNote).addModifier(vfArt, 0);
+                (vfnote as StaveNote).addModifier(vfArt, modifierIndex);
             }
         }
     }
@@ -1064,8 +1086,9 @@ export class VexFlowConverter {
         });
         if (isXNotehead) {
             // (vfnote as any).render_options.fretScale = rules.TabXNoteheadScale; // doesn't work, is overwritten later
-            (vfnote as any).render_options.scale = rules.TabXNoteheadScale; // VexFlowPatch
-            (vfnote as any).render_options.TabUseXNoteheadAlternativeGlyph = rules.TabUseXNoteheadAlternativeGlyph; // VexFlowPatch
+            (vfnote as any).render_options.scale = rules.TabXNoteheadScale;
+            (vfnote as any).render_options.TabUseXNoteheadAlternativeGlyph =
+                rules.TabUseXNoteheadAlternativeGlyph;
             vfnote.updateWidth(); // use .scale, update glyph
         }
         if (rules.UsePageBackgroundColorForTabNotes) {
@@ -1281,7 +1304,7 @@ export class VexFlowConverter {
                        font: Fonts = Fonts.TimesNewRoman, rules: EngravingRules, fontFamily: string = undefined): string {
         let style: string = "normal";
         let weight: string = "normal";
-        let family: string = `'${rules.DefaultFontFamily}'`; // default "'Times New Roman'"
+        let family: string = `'${rules.DefaultFontFamily}'`; // default "'Academico'"
 
         switch (fontStyle) {
             case FontStyles.Bold:
