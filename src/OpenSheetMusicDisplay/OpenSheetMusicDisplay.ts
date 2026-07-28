@@ -1250,7 +1250,7 @@ export class OpenSheetMusicDisplay {
             this.rules.DefaultColorTitle = options.defaultColorTitle;
         }
         if (options.defaultFontFamily) {
-            this.rules.DefaultFontFamily = options.defaultFontFamily; // default "Times New Roman", also used if font family not found
+            this.rules.DefaultFontFamily = options.defaultFontFamily; // default "Academico", also used if font family not found
         }
         if (options.defaultFontStyle) {
             this.rules.DefaultFontStyle = options.defaultFontStyle; // e.g. FontStyles.Bold
@@ -1553,11 +1553,12 @@ export class OpenSheetMusicDisplay {
                 }
 
                 // restore old cursor state
-                if (this.rules.RestoreCursorAfterRerender) {
-                    this.cursors[i].hidden = hidden;
+                const recreatedCursor: Cursor = this.cursors[i];
+                if (this.rules.RestoreCursorAfterRerender && recreatedCursor) {
+                    recreatedCursor.hidden = hidden;
                     if (previousIterator) {
-                        this.cursors[i].iterator = previousIterator;
-                        this.cursors[i].update();
+                        recreatedCursor.iterator = previousIterator;
+                        recreatedCursor.update();
                     }
                 }
             }
