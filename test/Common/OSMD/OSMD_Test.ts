@@ -215,6 +215,50 @@ describe("OpenSheetMusicDisplay Main Export", () => {
         );
     });
 
+    it("keeps visible quarter-rest optical clearance as hard layout padding", () => {
+        const xml: string = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list>
+    <score-part id="P1"><part-name>Voice</part-name></score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>2</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>2</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef>
+      </attributes>
+      <note><rest/><duration>2</duration><type>quarter</type></note>
+      <note><rest/><duration>1</duration><type>eighth</type></note>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>eighth</type></note>
+    </measure>
+  </part>
+</score-partwise>`;
+        const div: HTMLElement = TestUtils.getDivElement(document);
+        const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(div);
+
+        return osmd.load(xml).then(() => {
+            osmd.render();
+            const restVoiceEntries: any[] = osmd.GraphicSheet.MeasureList
+                .flatMap((measureList: any[]) => measureList)
+                .flatMap((measure: any) => measure.staffEntries)
+                .flatMap((staffEntry: any) => staffEntry.graphicalVoiceEntries)
+                .filter((gve: any) => gve.notes?.[0]?.sourceNote?.isRest?.());
+            const quarterRest: any = restVoiceEntries.find(
+                (gve: any) => gve.notes[0].sourceNote.Length.RealValue === 0.25
+            );
+            const eighthRest: any = restVoiceEntries.find(
+                (gve: any) => gve.notes[0].sourceNote.Length.RealValue === 0.125
+            );
+
+            expect(osmd.Sheet.Rules.LyricsXPaddingFactorForLongLyrics).to.equal(1.0);
+            expect(osmd.Sheet.Rules.QuarterRestRightClearance).to.equal(0.45);
+            expect(quarterRest.vfStaveNote.getLayoutPadding().rightPx).to.equal(4.5);
+            expect(eighthRest.vfStaveNote.getLayoutPadding().rightPx).to.equal(0);
+        });
+    });
+
     it("maps bass rest display hints onto centered rest lines", (done: Mocha.Done) => {
         const xml: string = `<?xml version="1.0" encoding="UTF-8"?>
 <score-partwise version="4.0">
@@ -334,9 +378,12 @@ describe("OpenSheetMusicDisplay Main Export", () => {
 
         return osmd.load(xml).then(() => {
             osmd.render();
-            const metrics: { duration: string, centerOffset: number } = wholeMeasureRestMetrics(osmd);
-            expect(metrics.duration).to.equal("1");
-            expect(metrics.centerOffset).to.be.lessThan(15);
+            const firstRenderMetrics: { duration: string, centerOffset: number } = wholeMeasureRestMetrics(osmd);
+            osmd.render();
+            const rerenderMetrics: { duration: string, centerOffset: number } = wholeMeasureRestMetrics(osmd);
+            expect(firstRenderMetrics.duration).to.equal("1");
+            expect(firstRenderMetrics.centerOffset).to.be.lessThan(0.01);
+            expect(rerenderMetrics.centerOffset).to.be.lessThan(0.01);
         });
     });
 
@@ -470,9 +517,12 @@ describe("OpenSheetMusicDisplay Main Export", () => {
 
         return osmd.load(xml).then(() => {
             osmd.render();
-            const metrics: { duration: string, centerOffset: number } = wholeMeasureRestMetrics(osmd);
-            expect(metrics.duration).to.equal("1");
-            expect(metrics.centerOffset).to.be.lessThan(15);
+            const firstRenderMetrics: { duration: string, centerOffset: number } = wholeMeasureRestMetrics(osmd);
+            osmd.render();
+            const rerenderMetrics: { duration: string, centerOffset: number } = wholeMeasureRestMetrics(osmd);
+            expect(firstRenderMetrics.duration).to.equal("1");
+            expect(firstRenderMetrics.centerOffset).to.be.lessThan(0.01);
+            expect(rerenderMetrics.centerOffset).to.be.lessThan(0.01);
         });
     });
 
