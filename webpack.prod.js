@@ -61,7 +61,7 @@ const chSongbook = merge(createCommonConfig({
 }), production, {
     name: 'ch-songbook',
     output: {
-        clean: false
+        clean: true
     },
     externals: {
         'vexflow/core': {
