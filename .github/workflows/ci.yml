@@ -2,13 +2,13 @@ name: CI
 # replaces .appveyor
 
 on:
-  [push, pull_request] # (all branches)
+  [push, pull_request, workflow_dispatch] # (all branches)
   #branches: [develop, master]
 
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v6
