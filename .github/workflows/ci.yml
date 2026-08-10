@@ -2,7 +2,7 @@ name: CI
 # replaces .appveyor
 
 on:
-  [push, pull_request] # (all branches)
+  [push, pull_request, workflow_dispatch] # (all branches)
   #branches: [develop, master]
 
 jobs:
