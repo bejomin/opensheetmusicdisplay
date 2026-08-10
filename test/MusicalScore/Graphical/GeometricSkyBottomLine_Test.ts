@@ -174,7 +174,10 @@ describe("GeometricSkyBottomLineCalculation", () => {
 
     it("agrees with the raster calculation for a one-line (percussion) staff", async function (): Promise<void> {
         this.timeout(30000);
-        await compareGeometricWithRaster("OSMD_function_test_drumset.musicxml");
+        // Firefox rasterizes one staff-line edge column differently from the geometric path.
+        await compareGeometricWithRaster("OSMD_function_test_drumset.musicxml", {
+            bigDiffFractionTolerance: 0.006,
+        });
     });
 
     it("agrees with the raster calculation for tablature with effects", async function (): Promise<void> {
