@@ -65,9 +65,9 @@ const chSongbook = merge(createCommonConfig({
     },
     externals: {
         'vexflow/core': {
-            commonjs: 'vexflow/core',
-            commonjs2: 'vexflow/core',
-            amd: 'vexflow/core',
+            commonjs: './vexflow-core.js',
+            commonjs2: './vexflow-core.js',
+            amd: './vexflow-core.js',
             root: 'VexFlow'
         }
     },

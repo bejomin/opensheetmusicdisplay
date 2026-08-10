@@ -9,8 +9,8 @@ const bundle = await readFile(bundleUrl, "utf8");
 if (bundle.includes("data:font/woff2;base64") || !bundle.includes("Bravura with Academico (external)")) {
   throw new Error("The CH-songbook bundle contains embedded fonts or lacks its external-font contract.");
 }
-if (!bundle.includes("vexflow/core")) {
-  throw new Error("The CH-songbook bundle does not leave vexflow/core external.");
+if (!bundle.includes("./vexflow-core.js")) {
+  throw new Error("The CH-songbook bundle does not reference its separate VexFlow core artefact.");
 }
 
 const require = createRequire(import.meta.url);
@@ -20,4 +20,6 @@ if (typeof osmd.OpenSheetMusicDisplay !== "function") {
   throw new Error("The CH-songbook bundle does not expose OpenSheetMusicDisplay.");
 }
 
-process.stdout.write("CH-songbook bundle contract verified: external fonts and external VexFlow.\n");
+process.stdout.write(
+  "CH-songbook bundle contract verified: external fonts and separate VexFlow core.\n",
+);
