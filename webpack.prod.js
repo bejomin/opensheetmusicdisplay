@@ -26,6 +26,13 @@ const production = {
     },
 }
 
+function externalFontPlugin() {
+    return new webpack.NormalModuleReplacementPlugin(
+        /FontProfileActive$/,
+        path.resolve(__dirname, 'src/OpenSheetMusicDisplay/FontProfileExternal.ts')
+    )
+}
+
 const bundled = merge(createCommonConfig(), production, {
     name: 'bundled',
     plugins: [
@@ -45,12 +52,26 @@ const core = merge(createCommonConfig({
     output: {
         clean: false
     },
-    plugins: [
-        new webpack.NormalModuleReplacementPlugin(
-            /FontProfileActive$/,
-            path.resolve(__dirname, 'src/OpenSheetMusicDisplay/FontProfileExternal.ts')
-        )
-    ]
+    plugins: [externalFontPlugin()]
 })
 
-module.exports = [bundled, core]
+const chSongbook = merge(createCommonConfig({
+    includeDemo: false,
+    libraryEntryName: 'opensheetmusicdisplay-ch-songbook'
+}), production, {
+    name: 'ch-songbook',
+    output: {
+        clean: false
+    },
+    externals: {
+        'vexflow/core': {
+            commonjs: 'vexflow/core',
+            commonjs2: 'vexflow/core',
+            amd: 'vexflow/core',
+            root: 'VexFlow'
+        }
+    },
+    plugins: [externalFontPlugin()]
+})
+
+module.exports = (env = {}) => env.chSongbook ? [chSongbook] : [bundled, core]

@@ -9,6 +9,8 @@ Two OSMD bundles are built:
 - `opensheetmusicdisplay.min.js` is self-contained. It embeds and awaits full Bravura, subsetted Bravura Text, and Academico regular, italic, and bold.
 - `opensheetmusicdisplay-core.min.js` contains no font binary data. Its default typed profile declares the same five required faces and produces a clear load error if the host has not supplied them.
 
+The fork also exposes an application-specific `opensheetmusicdisplay-ch-songbook.min.js` target. It uses the same external-font profile as the core bundle and leaves `vexflow/core` external so CH-songbook's own esbuild graph can resolve, deduplicate, and chunk the pinned VexFlow dependency. This target is built with `npm run build:ch-songbook`; it is the canonical CH-songbook runtime artefact, while the ordinary default/core bundles remain available for standalone OSMD development and upstream compatibility.
+
 Both bundles expose `IOSMDFontProfile` and `IOSMDFontFace`. A consumer can pass a different complete profile through `fontProfile`, including ordinary URLs or data URLs.
 
 The selected family names are propagated through VexFlow and OSMD-owned notation runs. This includes dynamics, chord-symbol SMuFL text, and ordinary score text; a custom profile therefore does not depend on hidden `Bravura` or `Academico` literals in those paths.
