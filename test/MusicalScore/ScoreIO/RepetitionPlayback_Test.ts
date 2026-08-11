@@ -47,4 +47,19 @@ describe("Music Sheet Repetition playback", () => {
         expect(sheet.Repetitions[0].UserNumberOfRepetitions).to.equal(3);
         expect(collectMeasureTraversal(sheet)).to.deep.equal([1, 2, 1, 3, 1, 4]);
     });
+
+    it("plays a shared first-through-fourth ending before the fifth ending", () => {
+        const sheet: MusicSheet = readSheet("test_repeat_volta_display_range_1_4_5.musicxml");
+
+        expect(sheet.Repetitions.length).to.equal(1);
+        expect(sheet.Repetitions[0].NumberOfEndings).to.equal(5);
+        expect(sheet.Repetitions[0].UserNumberOfRepetitions).to.equal(5);
+        expect(collectMeasureTraversal(sheet)).to.deep.equal([
+            1, 2,
+            1, 2,
+            1, 2,
+            1, 2,
+            1, 3,
+        ]);
+    });
 });

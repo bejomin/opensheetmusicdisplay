@@ -72,13 +72,15 @@ export class RepetitionInstructionReader {
             //   making this uneffective. Unclear whether the intention is to render the volta or not. (See #1367)
           }
           type = childNode.attribute("type").value;
-          let num: string = childNode.attribute("number").value;
-          if (childNode.value) {
-            num = childNode.value;
-            // MusicXML spec: "The element text is used when the text displayed in the ending is different than what appears in the number attribute."
-            //   Finale v27.3 accordingly seems to put the desired printed number here instead of in "number" (#1367)
+          // MusicXML uses the number attribute for playback semantics and the element text for display.
+          // Do not replace a valid number list with display text such as Dorico's "1–4.", which may use
+          // punctuation that is intentionally different from the machine-readable "1,2,3,4" value.
+          let parsedEndingIndices: number[] = this.parseEndingNumbers(childNode.attribute("number").value);
+          if (parsedEndingIndices.length === 0 && childNode.value) {
+            // Retain compatibility with exporters that leave number blank but put usable numbers in the text.
+            parsedEndingIndices = this.parseEndingNumbers(childNode.value);
           }
-          endingIndices.push(...this.parseEndingNumbers(num));
+          endingIndices.push(...parsedEndingIndices);
         }
       }
 
@@ -349,7 +351,7 @@ export class RepetitionInstructionReader {
       .filter((entry: string): boolean => entry.length > 0);
 
     for (const group of groups) {
-      const rangeMatch: RegExpMatchArray = group.match(/^(\d+)\s*-\s*(\d+)$/);
+      const rangeMatch: RegExpMatchArray = group.match(/^(\d+)\s*[-\u2010-\u2015\u2212]\s*(\d+)\s*\.?$/);
       if (rangeMatch) {
         const startIndex: number = Number.parseInt(rangeMatch[1], 10);
         const endIndex: number = Number.parseInt(rangeMatch[2], 10);

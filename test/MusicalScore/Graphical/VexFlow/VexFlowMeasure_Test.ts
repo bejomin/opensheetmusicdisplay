@@ -104,6 +104,28 @@ describe("VexFlow Measure", () => {
       }).catch(done);
    });
 
+   it("Formats first-through-fourth volta display text as an en-dash range", async (): Promise<void> => {
+      const score: Document = TestUtils.getScore("test_repeat_volta_display_range_1_4_5.musicxml");
+      const div: HTMLElement = TestUtils.getDivElement(document);
+      const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(div);
+
+      await osmd.load(score);
+      osmd.render();
+
+      const firstEndingMeasure: GraphicalMeasure = osmd.GraphicSheet.findGraphicalMeasure(1, 0);
+      const stave: { getModifiers(): { getCategory(): string, number?: string, text?: string }[] } =
+         (firstEndingMeasure as any).stave;
+      const labels: string[] = stave.getModifiers()
+         .filter((modifier: { getCategory(): string }): boolean => {
+            const category: string = modifier.getCategory();
+            return category === "voltas" || category === "Volta";
+         })
+         .map((modifier: { number?: string, text?: string }): string =>
+            String(modifier.number ?? modifier.text ?? ""));
+
+      expect(labels).to.deep.equal(["1–4."]);
+   });
+
    it("aligns adjacent volta lines to the highest required lane", async (): Promise<void> => {
       const source: Document = TestUtils.getScore("test_repeat_volta_1_2_3.musicxml");
       const score: Document = source.cloneNode(true) as Document;

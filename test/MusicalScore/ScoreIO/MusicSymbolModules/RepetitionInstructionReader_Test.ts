@@ -54,6 +54,30 @@ describe("RepetitionInstructionReader", () => {
                 10, 11, 12, 15,
             ]);
         });
+
+        it("uses ending numbers for playback when display text contains an en-dash range", () => {
+            const instructions: RepetitionInstruction[] = handleBarline(
+                `<barline location="left">
+                    <ending number="1,2,3,4" type="start">1–4.</ending>
+                </barline>`,
+            );
+
+            expect(findInstruction(instructions, RepetitionInstructionEnum.Ending)?.endingIndices).to.deep.equal([
+                1, 2, 3, 4,
+            ]);
+        });
+
+        it("accepts Unicode ranges as a fallback for blank ending numbers", () => {
+            const instructions: RepetitionInstruction[] = handleBarline(
+                `<barline location="left">
+                    <ending number=" " type="start">1–4.</ending>
+                </barline>`,
+            );
+
+            expect(findInstruction(instructions, RepetitionInstructionEnum.Ending)?.endingIndices).to.deep.equal([
+                1, 2, 3, 4,
+            ]);
+        });
     });
 
     describe("handleRepetitionInstructionsFromWordsOrSymbols", () => {
