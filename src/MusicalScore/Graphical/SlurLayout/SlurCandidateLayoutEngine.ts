@@ -47,6 +47,14 @@ const curveFamilies: readonly SlurCurveFamily[] = [
   "system-continuation",
 ];
 
+const noteheadAttachments: readonly SlurAnchorCandidate["type"][] = [
+  "notehead",
+  "notehead-center",
+  "notehead-shoulder",
+  "outer-head",
+];
+const noteheadDisplacementFactor: number = 0.65;
+
 const finitePoint: (point: PointF2D) => boolean = (point: PointF2D): boolean =>
   Number.isFinite(point.x) && Number.isFinite(point.y);
 
@@ -152,6 +160,22 @@ export function generateSlurAnchors(
       ? (direction < 0 ? endpoint.stem.top : endpoint.stem.bottom) + direction * endpointGap
       : undefined;
     let seedDisplacement: number = endpoint.seedAttachment === "voice-entry" ? 0.12 : 0.04;
+    if (
+      endpoint.notehead &&
+      noteheadAttachments.includes(endpoint.seedAttachment) &&
+      noteheadCenterX !== undefined &&
+      noteheadSideY !== undefined
+    ) {
+      // Compare imported notehead seeds with the rendered head rather than
+      // giving every source coordinate the same nominal cost. MusicXML
+      // bezier endpoints can sit at a distant shoulder (or even in open
+      // space), and that geometry must remain available without being
+      // artificially cheaper than a semantic attachment.
+      seedDisplacement = Math.hypot(
+        seedPoint.x - noteheadCenterX,
+        seedPoint.y - noteheadSideY,
+      ) * noteheadDisplacementFactor;
+    }
     if (endpoint.seedAttachment === "stem" && stemTipX !== undefined && stemTipY !== undefined) {
       seedDisplacement += Math.hypot(seedPoint.x - stemTipX, seedPoint.y - stemTipY) * 0.42;
     }
@@ -185,10 +209,6 @@ export function generateSlurAnchors(
       continue;
     }
     if (endpoint.notehead) {
-      const centerDisplacement: number = Math.hypot(
-        noteheadCenterX - seedPoint.x,
-        noteheadSideY - seedPoint.y,
-      );
       result[side].push(
         makeAnchor(
           context,
@@ -197,10 +217,10 @@ export function generateSlurAnchors(
           noteheadSideY,
           "notehead-center",
           generationIndex++,
-          // The crown is a useful engraving option, not a universal rule.
-          // Leave an ordinary, exact seed shoulder slightly cheaper unless
-          // the crown produces materially better curve geometry.
-          centerDisplacement * 0.1,
+          // The rendered crown is the semantic reference for an ordinary
+          // single-note endpoint. Chords, stems, articulations, tangents, and
+          // collision scoring can still make another candidate preferable.
+          0,
         ),
       );
       const x: number =
@@ -211,7 +231,7 @@ export function generateSlurAnchors(
           ? Math.min(...sameSideBounds.map((bounds): number => bounds.top))
           : Math.max(...sameSideBounds.map((bounds): number => bounds.bottom))) +
         direction * endpointGap;
-      const displacement: number = Math.hypot(x - seedPoint.x, y - seedPoint.y);
+      const displacement: number = Math.hypot(x - noteheadCenterX, y - noteheadSideY);
       result[side].push(
         makeAnchor(
           context,
@@ -220,7 +240,7 @@ export function generateSlurAnchors(
           y,
           "notehead-shoulder",
           generationIndex++,
-          displacement * 0.45,
+          displacement * noteheadDisplacementFactor,
         ),
       );
       // Chord endpoint geometry has already selected the placement-side outer
@@ -232,8 +252,8 @@ export function generateSlurAnchors(
         const outerHeadX: number =
           side === "start" ? endpoint.notehead.right - inset : endpoint.notehead.left + inset;
         const outerHeadDisplacement: number = Math.hypot(
-          outerHeadX - seedPoint.x,
-          y - seedPoint.y,
+          outerHeadX - noteheadCenterX,
+          y - noteheadSideY,
         );
         result[side].push(
           makeAnchor(
@@ -243,7 +263,7 @@ export function generateSlurAnchors(
             y,
             "outer-head",
             generationIndex++,
-            outerHeadDisplacement * 0.35,
+            outerHeadDisplacement * noteheadDisplacementFactor,
           ),
         );
       }
@@ -262,7 +282,7 @@ export function generateSlurAnchors(
         makeAnchor(context, side, x, y, "beam-side", generationIndex++, displacement * 0.12),
       );
     }
-    if (endpoint.stem && (endpoint.chordSize <= 1 || endpoint.stemSide)) {
+    if (endpoint.stem && endpoint.stemSide) {
       const displacement: number = Math.hypot(
         stemTipX - seedPoint.x,
         stemTipY - seedPoint.y,
@@ -275,11 +295,9 @@ export function generateSlurAnchors(
         endpoint.chordSize > 1 &&
         Math.abs(seed.p3.x - seed.p0.x) < 10 &&
         context.isNested;
-      const displacementPenalty: number = endpoint.stemSide
-        ? avoidRemoteCompactStem
-          ? displacement + 0.85
-          : Math.min(displacement * 0.04, 0.12)
-        : displacement * 0.16 + 0.15;
+      const displacementPenalty: number = avoidRemoteCompactStem
+        ? displacement + 0.85
+        : Math.min(displacement * 0.04, 0.12);
       result[side].push(
         makeAnchor(
           context,
@@ -553,8 +571,8 @@ function familyGeometry(
     default:
       break;
   }
-  const p1x: number = start.x + width * firstRatio;
-  const p2x: number = start.x + width * secondRatio;
+  let p1x: number = start.x + width * firstRatio;
+  let p2x: number = start.x + width * secondRatio;
   const direction: number = context.direction === PlacementEnum.Above ? -1 : 1;
   let minimumBow: number = Math.min(3.2, Math.max(0.65, Math.abs(width) * 0.055));
   const derivesBowFromSemanticAnchors: boolean = [start.type, end.type].some(
@@ -574,13 +592,14 @@ function familyGeometry(
     // handled by the high family's sampled obstacle clearance below.
     minimumBow = Math.max(minimumBow, Math.min(seedBow, minimumBow * 2.2));
   } else {
-    // Ordinary head routes retain the established curve's obstacle-clearing
-    // bow as a floor. Semantic endpoint moves deliberately opt out: carrying
-    // a notehead route's bow over to a stem or articulation anchor produces a
-    // detached, needlessly deep curve around otherwise local geometry.
+    // The exact source route remains a separate normal candidate. Regenerated
+    // notehead routes retain the source contour only up to a span-relative
+    // cap, so an exported bezier cannot force every semantic alternative to
+    // reproduce its excessive bow. Compact phrases use the tighter cap; the
+    // high family below remains responsible for real obstacle clearance.
     minimumBow = Math.max(
       minimumBow,
-      seedBow,
+      Math.abs(width) < 10 ? Math.min(seedBow, minimumBow * 1.8) : seedBow,
     );
   }
   if (context.isCrossStaff) {
@@ -617,6 +636,55 @@ function familyGeometry(
       Math.hypot(width, end.y - start.y) / Math.max(0.001, Math.abs(width)),
     );
     commonBow *= perpendicularProjection;
+  }
+  if (
+    Math.abs(width) < 10 &&
+    Math.abs(width) > 0.001 &&
+    !context.isCrossStaff &&
+    !context.start.systemBoundary &&
+    !context.end.systemBoundary
+  ) {
+    // A compact, obstacle-routed slur can need a substantial bow while the
+    // contour pressure places one control point very close to its endpoint.
+    // That combination creates the hooked ends seen at different responsive
+    // widths. Widen only a control arm whose actual endpoint tangent is too
+    // steep, preserving asymmetric contours that already leave both notes
+    // cleanly.
+    const baselineSlope: number = (end.y - start.y) / width;
+    const effectiveBow: number = commonBow * heightFactor;
+    const maximumControlRun: number = Math.abs(width) * 0.44;
+    const maximumEndpointSlope: number = 2.1;
+    const widenControlRun: (initialRun: number, bowOffset: number) => number =
+      (initialRun, bowOffset): number => {
+        const tangentSlope: (run: number) => number = (run): number =>
+          Math.abs(baselineSlope + bowOffset / Math.max(0.001, run));
+        if (
+          initialRun >= maximumControlRun ||
+          tangentSlope(initialRun) <= maximumEndpointSlope ||
+          tangentSlope(maximumControlRun) >= tangentSlope(initialRun)
+        ) {
+          return initialRun;
+        }
+        if (tangentSlope(maximumControlRun) > maximumEndpointSlope) {
+          return maximumControlRun;
+        }
+        let lower: number = initialRun;
+        let upper: number = maximumControlRun;
+        for (let iteration: number = 0; iteration < 16; iteration++) {
+          const midpoint: number = (lower + upper) / 2;
+          if (tangentSlope(midpoint) > maximumEndpointSlope) {
+            lower = midpoint;
+          } else {
+            upper = midpoint;
+          }
+        }
+        return upper;
+      };
+    const horizontalDirection: number = Math.sign(width);
+    const startRun: number = widenControlRun(Math.abs(p1x - start.x), effectiveBow);
+    const endRun: number = widenControlRun(Math.abs(end.x - p2x), -effectiveBow);
+    p1x = start.x + horizontalDirection * startRun;
+    p2x = end.x - horizontalDirection * endRun;
   }
   const p1: PointF2D = new PointF2D(p1x, lineY(start, end, p1x) + commonBow * heightFactor);
   const p2: PointF2D = new PointF2D(p2x, lineY(start, end, p2x) + commonBow * heightFactor);
@@ -977,10 +1045,11 @@ function scoreCandidate(
   const acuteNoteheadPenalty: (anchor: SlurAnchorCandidate) => number =
     (anchor): number => {
       if (anchor.type === "notehead-center") {
-        // A shallow phrase normally leaves a chord more cleanly from its
-        // shoulder. Reserve the crown preference for an acute approach, where
-        // a lateral attachment otherwise looks as though it lands in space.
-        return phraseSlope < 0.65 ? 0.5 : 0;
+        const endpoint: SlurEndpointContext = anchor.side === "start" ? context.start : context.end;
+        // The placement-side outer head is already selected for a chord. A
+        // shallow chord phrase can still leave that head more cleanly from its
+        // shoulder, but single-note crowns must not receive this blanket cost.
+        return endpoint.chordSize > 1 && phraseSlope < 0.65 ? 0.5 : 0;
       }
       if (phraseSlope <= 0.65) {
         return 0;

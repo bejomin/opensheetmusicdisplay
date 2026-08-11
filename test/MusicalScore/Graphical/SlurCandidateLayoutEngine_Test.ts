@@ -240,6 +240,75 @@ describe("candidate slur layout engine", (): void => {
     expect(anchors.end.some((anchor) => anchor.type === "notehead")).to.equal(true);
   });
 
+  it("prices detached notehead seeds from the rendered crown at both endpoints", (): void => {
+    const detachedSeed: SlurCurveGeometry = {
+      p0: new PointF2D(3.2, 0.2),
+      p1: new PointF2D(4, -1.4),
+      p2: new PointF2D(16, -1.4),
+      p3: new PointF2D(16.8, 0.2),
+    };
+    const anchors: {start: SlurAnchorCandidate[], end: SlurAnchorCandidate[]} =
+      generateSlurAnchors(context(), detachedSeed, options.obstacleClearance);
+
+    for (const side of ["start", "end"] as const) {
+      const seedAnchor: SlurAnchorCandidate = anchors[side].find(
+        (anchor): boolean => anchor.type === "notehead",
+      );
+      const crown: SlurAnchorCandidate = anchors[side].find(
+        (anchor): boolean => anchor.type === "notehead-center",
+      );
+      const outerHead: SlurAnchorCandidate = anchors[side].find(
+        (anchor): boolean => anchor.type === "outer-head",
+      );
+      expect(seedAnchor.penalties.displacement).to.be.greaterThan(
+        crown.penalties.displacement,
+      );
+      expect(seedAnchor.penalties.displacement).to.be.greaterThan(0.9);
+      expect(outerHead.penalties.displacement).to.be.greaterThan(0.05);
+    }
+  });
+
+  it("favours rendered crowns for a compact unobstructed single-note slur", (): void => {
+    const detachedSeed: SlurCurveGeometry = {
+      p0: new PointF2D(3.2, 0.2),
+      p1: new PointF2D(4, -3.8),
+      p2: new PointF2D(6, -3.8),
+      p3: new PointF2D(6.8, 0.2),
+    };
+    const clearContext: SlurLayoutContext = context({end: endpoint("end", 8)});
+    clearContext.envelope = {
+      ...clearContext.envelope,
+      skyline: Array(201).fill(4),
+      topLineOffset: 4,
+    };
+    const result: SlurLayoutResult = calculateCandidateSlurLayout(
+      clearContext,
+      detachedSeed,
+      options,
+    );
+    const selected: SlurCurveCandidate = result.candidates.find(
+      (candidate): boolean => candidate.id === result.selectedCandidateId,
+    );
+    const selectedBow: number = Math.max(
+      Math.abs(selected.geometry.p1.y - selected.geometry.p0.y),
+      Math.abs(selected.geometry.p2.y - selected.geometry.p3.y),
+    );
+    const sourceBow: number = Math.max(
+      Math.abs(detachedSeed.p1.y - detachedSeed.p0.y),
+      Math.abs(detachedSeed.p2.y - detachedSeed.p3.y),
+    );
+
+    expect(selected.startAnchor.type).to.equal("notehead-center");
+    expect(selected.endAnchor.type).to.equal("notehead-center");
+    expect(selectedBow).to.be.greaterThan(0.6);
+    expect(selectedBow).to.be.lessThan(sourceBow / 2);
+    expect(result.candidates.some(
+      (candidate): boolean =>
+        candidate.startAnchor.type === "notehead-shoulder" ||
+        candidate.endAnchor.type === "outer-head",
+    )).to.equal(true);
+  });
+
   it("does not reuse a drifted staff-entry stem anchor", (): void => {
     const driftedStart: SlurEndpointContext = {
       ...endpoint("start", 2),
@@ -340,6 +409,21 @@ describe("candidate slur layout engine", (): void => {
     );
 
     expect(anchors.start.some((anchor) => anchor.type === "stem-tip")).to.equal(true);
+  });
+
+  it("does not offer a stem tip on the opposite side of a notehead", (): void => {
+    const oppositeStemStart: SlurEndpointContext = {
+      ...endpoint("start", 2),
+      stem: {left: 1.95, right: 2.05, top: -2, bottom: 2.5},
+      stemSide: false,
+    };
+    const anchors: {start: SlurAnchorCandidate[], end: SlurAnchorCandidate[]} = generateSlurAnchors(
+      context({start: oppositeStemStart}),
+      seed,
+      options.obstacleClearance,
+    );
+
+    expect(anchors.start.some((anchor) => anchor.type === "stem-tip")).to.equal(false);
   });
 
   it("keeps a nested compact chord stem tip as a fallback behind the outer head", (): void => {
@@ -456,6 +540,47 @@ describe("candidate slur layout engine", (): void => {
     expect(result.candidates.some((candidate) => candidate.family === "shallow")).to.equal(false);
     expect(result.candidates.some((candidate) => candidate.family === "flattened-long")).to.equal(false);
     expect(result.candidates.some((candidate) => candidate.family === "normal")).to.equal(true);
+  });
+
+  it("widens compact control arms that would hook into an endpoint", (): void => {
+    const compactSeed: SlurCurveGeometry = {
+      p0: new PointF2D(2, 1.2),
+      p1: new PointF2D(3, -1),
+      p2: new PointF2D(7, -1),
+      p3: new PointF2D(8, 1.2),
+    };
+    const compactContext: SlurLayoutContext = context({
+      end: endpoint("end", 8),
+      obstacles: [{
+        id: "compact-centre-obstacle",
+        type: "notehead",
+        bounds: {left: 4.4, right: 5.6, top: -2.4, bottom: 0.4},
+        clearance: 0.1,
+      }],
+    });
+    const result: SlurLayoutResult = calculateCandidateSlurLayout(
+      compactContext,
+      compactSeed,
+      options,
+    );
+    const routed: SlurCurveCandidate = result.candidates.find(
+      (candidate): boolean =>
+        candidate.family === "high" &&
+        !candidate.rejected &&
+        candidate.startAnchor.type === "notehead-center" &&
+        candidate.endAnchor.type === "notehead-center",
+    );
+    const startSlope: number = Math.abs(
+      (routed.geometry.p1.y - routed.geometry.p0.y) /
+      (routed.geometry.p1.x - routed.geometry.p0.x),
+    );
+    const endSlope: number = Math.abs(
+      (routed.geometry.p3.y - routed.geometry.p2.y) /
+      (routed.geometry.p3.x - routed.geometry.p2.x),
+    );
+
+    expect(startSlope).to.be.at.most(2.11);
+    expect(endSlope).to.be.at.most(2.11);
   });
 
   it("places a chord endpoint shoulder outside its selected accidental", (): void => {
