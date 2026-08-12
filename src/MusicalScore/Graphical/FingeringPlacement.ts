@@ -1,4 +1,34 @@
 import { PlacementEnum } from "../VoiceData/Expressions/AbstractExpression";
+import { TechnicalInstruction } from "../VoiceData/Instructions/TechnicalInstruction";
+import { Note } from "../VoiceData/Note";
+
+export type FingeringInstructionGroup = {
+    instructions: TechnicalInstruction[];
+    sourceNote: Note;
+    isSubstitution: boolean;
+};
+
+/** Group each `substitution="yes"` instruction with the preceding fingering
+ * on the same note, retaining the authored left-to-right XML order. */
+export function groupFingeringSubstitutions(
+    fingerings: TechnicalInstruction[],
+): FingeringInstructionGroup[] {
+    const groups: FingeringInstructionGroup[] = [];
+    for (const fingering of fingerings) {
+        const previous: FingeringInstructionGroup = groups[groups.length - 1];
+        if (fingering.substitution && previous?.sourceNote === fingering.sourceNote) {
+            previous.instructions.push(fingering);
+            previous.isSubstitution = true;
+            continue;
+        }
+        groups.push({
+            instructions: [fingering],
+            sourceNote: fingering.sourceNote,
+            isSubstitution: false,
+        });
+    }
+    return groups;
+}
 
 function isSpecificPlacement(placement: PlacementEnum | undefined): boolean {
     return placement === PlacementEnum.Above ||

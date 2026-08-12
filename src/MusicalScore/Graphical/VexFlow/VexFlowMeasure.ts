@@ -38,7 +38,12 @@ import { GraphicalTie } from "../GraphicalTie";
 import { Note } from "../../VoiceData/Note";
 import { TabNote } from "../../VoiceData/TabNote";
 import { getDefaultTextFontFamily } from "../ScoreTextFontRouting";
-import { resolveFingeringPlacement } from "../FingeringPlacement";
+import {
+    FingeringInstructionGroup,
+    groupFingeringSubstitutions,
+    resolveFingeringPlacement,
+} from "../FingeringPlacement";
+import { VexFlowFingeringModifier } from "./VexFlowFingeringModifier";
 
 const DOUBLE_HEAVY_BARLINE_TYPE: number = 8;
 
@@ -883,6 +888,7 @@ export class VexFlowMeasure extends GraphicalMeasure {
         for (const staffEntry of this.staffEntries as VexFlowStaffEntry[]) {
             staffEntry.synchronizeLyricAnchorOffsets(this.stave);
             staffEntry.synchronizeChordSymbolAnchorOffsets(this.stave);
+            staffEntry.synchronizeFingeringAnchorOffsets(this.stave);
         }
     }
 
@@ -2028,129 +2034,121 @@ export class VexFlowMeasure extends GraphicalMeasure {
         }
     }
 
-    /** Creates vexflow fingering elements.
-     * Normal notes use these modifiers only for left/right placement; above/below
-     * fingerings are added by MusicSheetCalculator.calculateFingerings() as
-     * labels with bounding boxes. Grace notes continue to use VexFlow modifiers
-     * for every placement because the later label pass deliberately skips them.
+    /** Creates VexFlow fingering elements.
+     *
+     * Normal notes use these modifiers only for left/right placement; their
+     * above/below fingerings are skyline-aware GraphicalFingeringEntries. Grace
+     * notes use this path for every placement because each independently scaled
+     * grace voice owns its own final VexFlow x-position. The custom modifier
+     * gives that separate path the same notehead centring, substitution and
+     * staff-line-knockout semantics without promoting grace digits to normal
+     * note size.
      */
     protected createFingerings(voiceEntry: GraphicalVoiceEntry): void {
         const vexFlowVoiceEntry: VexFlowVoiceEntry = voiceEntry as VexFlowVoiceEntry;
-        let numberOfFingerings: number = 0;
-        // count total number of fingerings
-        for (const note of voiceEntry.notes) {
-            const fingering: TechnicalInstruction = note.sourceNote.Fingering;
-            if (fingering) {
-                numberOfFingerings++;
-            }
-        }
-        const fingeringInstructions: TechnicalInstruction[] = [];
-        for (const instruction of voiceEntry.parentVoiceEntry.TechnicalInstructions) {
-            if (instruction.type === TechnicalInstructionType.Fingering) {
-                fingeringInstructions.push(instruction);
-            }
-        }
-        if (fingeringInstructions.length > numberOfFingerings) { // likely multiple instructions per note given (e.g. Sibelius)
-            // assign fingerings to notes
-            let unassignedFingeringIndex: number = 0;
-            for (const note of voiceEntry.notes) {
-                if (!note.sourceNote.Fingering) {
-                    if (unassignedFingeringIndex > fingeringInstructions.length - 1) {
-                        break;
-                    }
-                    note.sourceNote.Fingering = fingeringInstructions[unassignedFingeringIndex];
-                    unassignedFingeringIndex++;
-                } else {
-                    unassignedFingeringIndex++; // we already assigned this fingering to a note, skip.
-                }
-            }
-        }
-        let fingeringIndex: number = -1;
-        for (const note of voiceEntry.notes) {
-            const fingering: TechnicalInstruction = note.sourceNote.Fingering;
-            if (!fingering) {
-                fingeringIndex++;
-                continue;
-            }
-            fingeringIndex++; // 0 for first fingering
-            const isGrace: boolean = voiceEntry.parentVoiceEntry.IsGrace;
-            const configuredPlacement: PlacementEnum = isGrace
-                ? this.rules.FingeringPositionGrace
-                : this.rules.FingeringPosition;
-            const fingeringPosition: PlacementEnum = resolveFingeringPlacement(
-                fingering.placement,
-                configuredPlacement,
-                this.isUpperStaffOfInstrument() ? PlacementEnum.Above : PlacementEnum.Below,
-                voiceEntry.notes.length > 1 || voiceEntry.parentStaffEntry.graphicalVoiceEntries.length > 1,
+        const isGrace: boolean = voiceEntry.parentVoiceEntry.IsGrace;
+        const staffSidePlacement: PlacementEnum = this.isUpperStaffOfInstrument()
+            ? PlacementEnum.Above
+            : PlacementEnum.Below;
+        const allInstructions: TechnicalInstruction[] =
+            voiceEntry.parentVoiceEntry.TechnicalInstructions.filter(
+                (instruction: TechnicalInstruction): boolean =>
+                    instruction.type === TechnicalInstructionType.Fingering,
             );
-            if (!isGrace &&
-                fingeringPosition !== PlacementEnum.Left &&
-                fingeringPosition !== PlacementEnum.Right) {
+
+        for (const graphicalNote of voiceEntry.notes) {
+            let noteInstructions: TechnicalInstruction[] = allInstructions.filter(
+                (instruction: TechnicalInstruction): boolean => instruction.sourceNote === graphicalNote.sourceNote,
+            );
+            if (noteInstructions.length === 0 && graphicalNote.sourceNote.Fingering) {
+                noteInstructions = [graphicalNote.sourceNote.Fingering];
+            }
+            const groups: FingeringInstructionGroup[] = groupFingeringSubstitutions(noteInstructions);
+            if (groups.length === 0) {
                 continue;
             }
-            let offsetX: number = this.rules.FingeringOffsetX;
-            let modifierPosition: number; // VF.Stavemodifier.Position
-            switch (fingeringPosition) {
-                case PlacementEnum.Left:
-                    modifierPosition = VF.StaveModifier.Position.LEFT;
-                    offsetX -= note.baseFingeringXOffset * unitInPixels;
-                    break;
-                case PlacementEnum.Right:
-                    modifierPosition = VF.StaveModifier.Position.RIGHT;
-                    offsetX += note.baseFingeringXOffset * unitInPixels;
-                    break;
-                case PlacementEnum.Above:
-                    modifierPosition = VF.StaveModifier.Position.ABOVE;
-                    break;
-                case PlacementEnum.Below:
-                    modifierPosition = VF.StaveModifier.Position.BELOW;
-                    break;
-                default:
-                    continue;
-            }
-
-            const fretFinger: VF.FretHandFinger = new VF.FretHandFinger(fingering.value);
-            fretFinger.setPosition(modifierPosition);
-            fretFinger.setOffsetX(offsetX);
-            const isSideFingering: boolean = !isGrace &&
-                (fingeringPosition === PlacementEnum.Left || fingeringPosition === PlacementEnum.Right);
-            if (isSideFingering) {
-                // Side fingerings use VexFlow modifiers, while above/below fingerings
-                // use OSMD labels. Keep both paths at the configured OSMD text size.
-                fretFinger.setFontSize(`${this.rules.FingeringTextSize * unitInPixels}px`);
-            }
-            if (!isGrace && fingeringPosition === PlacementEnum.Left) {
-                // VexFlow draws a left fingering's right edge directly against the
-                // notehead. Growing the modifier width both opens the requested gap
-                // and reserves it in the modifier context used for horizontal spacing.
-                const noteheadPaddingPx: number = Math.max(0, this.rules.FingeringNoteheadXPadding) * unitInPixels;
-                fretFinger.setWidth(fretFinger.getWidth() + noteheadPaddingPx);
-            }
-            if (fingeringPosition === PlacementEnum.Above || fingeringPosition === PlacementEnum.Below) {
-                const offsetYSign: number = fingeringPosition === PlacementEnum.Above ? -1 : 1; // minus y is up
-                const ordering: number = fingeringPosition === PlacementEnum.Above ? fingeringIndex :
-                    numberOfFingerings - 1 - fingeringIndex; // reverse order for fingerings below staff
-                if (this.rules.FingeringInsideStafflines && numberOfFingerings > 1) { // y-shift for single fingering is ok
-                    // experimental, bounding boxes wrong for fretFinger above/below, better would be creating Labels
-                    // set y-shift. vexflow fretfinger simply places directly above/below note
-                    const perFingeringShift: number = fretFinger.getWidth() / 2;
-                    const shiftCount: number = numberOfFingerings * 2.5;
-                    fretFinger.setOffsetY(offsetYSign * (ordering + shiftCount) * perFingeringShift);
-                } else if (!this.rules.FingeringInsideStafflines) { // use StringNumber for placement above/below stafflines
-                    const stringNumber: VF.StringNumber = new VF.StringNumber(fingering.value);
-                    stringNumber.setDrawCircle(false); // remove the circle around the number
-                    stringNumber.setPosition(modifierPosition);
-                    stringNumber.setOffsetY(offsetYSign * ordering * stringNumber.getWidth() * 2 / 3);
-                    vexFlowVoiceEntry.vfStaveNote.addModifier((stringNumber as any), fingeringIndex);
+            for (let groupIndex: number = 0; groupIndex < groups.length; groupIndex++) {
+                const group: FingeringInstructionGroup = groups[groupIndex];
+                const fingering: TechnicalInstruction = group.instructions[0];
+                const configuredPlacement: PlacementEnum = isGrace
+                    ? this.rules.FingeringPositionGrace
+                    : this.rules.FingeringPosition;
+                const hasExplicitPlacement: boolean = fingering.placement === PlacementEnum.Above ||
+                    fingering.placement === PlacementEnum.Below ||
+                    fingering.placement === PlacementEnum.Left ||
+                    fingering.placement === PlacementEnum.Right;
+                const fingeringPosition: PlacementEnum = group.isSubstitution && !hasExplicitPlacement
+                    ? staffSidePlacement
+                    : resolveFingeringPlacement(
+                        fingering.placement,
+                        configuredPlacement,
+                        staffSidePlacement,
+                        voiceEntry.notes.length > 1 ||
+                            voiceEntry.parentStaffEntry.graphicalVoiceEntries.length > 1,
+                    );
+                if (!isGrace &&
+                    fingeringPosition !== PlacementEnum.Left &&
+                    fingeringPosition !== PlacementEnum.Right) {
                     continue;
                 }
-            }
-            // if (vexFlowVoiceEntry.vfStaveNote.getCategory() === "tabnotes") {
-              // TODO this doesn't work yet for tabnotes. don't add fingering for tabs for now.
-              // vexFlowVoiceEntry.vfStaveNote.addModifier(fretFinger, fingeringIndex);
 
-            // Vexflow made a mess with the addModifier signature that changes through each class so we just cast to any :(
-            vexFlowVoiceEntry.vfStaveNote.addModifier((fretFinger as any), fingeringIndex);
+                let offsetX: number = this.rules.FingeringOffsetX;
+                let modifierPosition: number;
+                switch (fingeringPosition) {
+                    case PlacementEnum.Left:
+                        modifierPosition = VF.StaveModifier.Position.LEFT;
+                        offsetX -= graphicalNote.baseFingeringXOffset * unitInPixels;
+                        break;
+                    case PlacementEnum.Right:
+                        modifierPosition = VF.StaveModifier.Position.RIGHT;
+                        offsetX += graphicalNote.baseFingeringXOffset * unitInPixels;
+                        break;
+                    case PlacementEnum.Above:
+                        modifierPosition = VF.StaveModifier.Position.ABOVE;
+                        break;
+                    case PlacementEnum.Below:
+                        modifierPosition = VF.StaveModifier.Position.BELOW;
+                        break;
+                    default:
+                        continue;
+                }
+
+                const fingeringText: string = group.instructions
+                    .map((instruction: TechnicalInstruction): string => instruction.value)
+                    .join("\u2009");
+                const fretFinger: VexFlowFingeringModifier =
+                    new VexFlowFingeringModifier(fingeringText, group.isSubstitution);
+                fretFinger.setPosition(modifierPosition);
+                fretFinger.setOffsetX(offsetX);
+                if (!isGrace) {
+                    // Side modifiers and skyline-aware labels share OSMD's
+                    // configured ordinary-note fingering size.
+                    fretFinger.setFontSize(`${this.rules.FingeringTextSize * unitInPixels}px`);
+                }
+                if (fingeringPosition === PlacementEnum.Left) {
+                    // Grace digits retain their VexFlow scale, so scale the
+                    // ordinary-note clearance by the same ratio.
+                    const normalSizePx: number = this.rules.FingeringTextSize * unitInPixels;
+                    const scale: number = isGrace && normalSizePx > 0
+                        ? fretFinger.fontSizeInPixels / normalSizePx
+                        : 1;
+                    const noteheadPaddingPx: number =
+                        Math.max(0, this.rules.FingeringNoteheadXPadding) * unitInPixels * scale;
+                    fretFinger.setNoteheadClearance(noteheadPaddingPx);
+                }
+                if ((fingeringPosition === PlacementEnum.Above || fingeringPosition === PlacementEnum.Below) &&
+                    groups.length > 1) {
+                    const offsetYSign: number = fingeringPosition === PlacementEnum.Above ? -1 : 1;
+                    const ordering: number = fingeringPosition === PlacementEnum.Above
+                        ? groupIndex
+                        : groups.length - 1 - groupIndex;
+                    fretFinger.setOffsetY(offsetYSign * ordering * fretFinger.getHeight());
+                }
+
+                const noteIndex: number = (graphicalNote as VexFlowGraphicalNote).vfnoteIndex;
+                // VexFlow's addModifier signature varies across modifier classes.
+                vexFlowVoiceEntry.vfStaveNote.addModifier((fretFinger as any), noteIndex);
+            }
         }
     }
 

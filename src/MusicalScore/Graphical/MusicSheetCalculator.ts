@@ -75,7 +75,12 @@ import { LyricExtendType, LyricsEntry } from "../VoiceData/Lyrics/LyricsEntry";
 import { Voice } from "../VoiceData/Voice";
 import { TabNote } from "../VoiceData/TabNote";
 import { IHorizontalSystemSpacingPlanner } from "./HorizontalSystemSpacing";
-import { resolveFingeringPlacement } from "./FingeringPlacement";
+import {
+    FingeringInstructionGroup,
+    groupFingeringSubstitutions,
+    resolveFingeringPlacement,
+} from "./FingeringPlacement";
+import { GraphicalFingeringEntry } from "./GraphicalFingeringEntry";
 
 /**
  * Class used to do all the calculations in a MusicSheet, which in the end populates a GraphicalMusicSheet.
@@ -3439,13 +3444,24 @@ export abstract class MusicSheetCalculator {
                                 continue;
                             }
                             // Sibelius: can have multiple fingerings per note, so we need to check voice entry instructions, not note.Fingering
-                            for (const instruction of voiceEntry.parentVoiceEntry.TechnicalInstructions) {
+                            const fingeringInstructions: TechnicalInstruction[] =
+                                voiceEntry.parentVoiceEntry.TechnicalInstructions.filter(
+                                    (instruction: TechnicalInstruction): boolean =>
+                                        instruction.type === TechnicalInstructionType.Fingering,
+                                );
+                            const substitutionInstructions: Set<TechnicalInstruction> = new Set(
+                                groupFingeringSubstitutions(fingeringInstructions)
+                                    .filter((group: FingeringInstructionGroup): boolean => group.isSubstitution)
+                                    .flatMap((group: FingeringInstructionGroup): TechnicalInstruction[] => group.instructions),
+                            );
+                            for (const instruction of fingeringInstructions) {
                                 if (instruction.type === TechnicalInstructionType.Fingering) {
                                     const placement: PlacementEnum = resolveFingeringPlacement(
                                         instruction.placement,
                                         this.rules.FingeringPosition,
                                         staffSidePlacement,
-                                        voiceEntry.notes.length > 1 || gse.graphicalVoiceEntries.length > 1,
+                                        !substitutionInstructions.has(instruction) &&
+                                            (voiceEntry.notes.length > 1 || gse.graphicalVoiceEntries.length > 1),
                                     );
                                     fingeringsByPlacement.get(placement)?.push(instruction);
                                 }
@@ -3479,21 +3495,23 @@ export abstract class MusicSheetCalculator {
         const skybottomcalculator: SkyBottomLineCalculator = line.SkyBottomLineCalculator;
         const staffEntryPositionX: number = gse.PositionAndShape.RelativePosition.x +
             measure.PositionAndShape.RelativePosition.x;
-        if (fingerings.length > 1) {
-            const distinctPitchedNotes: boolean = fingerings.every(
-                (fingering: TechnicalInstruction, index: number) => fingering.sourceNote?.Pitch !== undefined &&
-                    fingerings.findIndex((other: TechnicalInstruction) => other.sourceNote === fingering.sourceNote) === index);
+        const groups: FingeringInstructionGroup[] = groupFingeringSubstitutions(fingerings);
+        if (groups.length > 1) {
+            const distinctPitchedNotes: boolean = groups.every(
+                (group: FingeringInstructionGroup, index: number): boolean => group.sourceNote?.Pitch !== undefined &&
+                    groups.findIndex((other: FingeringInstructionGroup): boolean =>
+                        other.sourceNote === group.sourceNote) === index);
             if (distinctPitchedNotes) {
                 // Stack fingerings in pitch order so the labels mirror the chord.
-                fingerings.sort((a: TechnicalInstruction, b: TechnicalInstruction) =>
+                groups.sort((a: FingeringInstructionGroup, b: FingeringInstructionGroup): number =>
                     a.sourceNote.Pitch.getHalfTone() - b.sourceNote.Pitch.getHalfTone());
                 if (placement === PlacementEnum.Below) {
-                    fingerings.reverse();
+                    groups.reverse();
                 }
             } else {
                 // Bulk fingerings (multiple instructions on one note) retain XML order.
                 if (placement === PlacementEnum.Below) {
-                    fingerings.reverse();
+                    groups.reverse();
                 }
                 let topNote: Note;
                 for (const gve of gse.graphicalVoiceEntries) {
@@ -3503,23 +3521,40 @@ export abstract class MusicSheetCalculator {
                         }
                     }
                 }
-                if (fingerings[0].sourceNote === topNote && placement === PlacementEnum.Above) {
-                    fingerings.reverse();
+                if (groups[0].sourceNote === topNote && placement === PlacementEnum.Above) {
+                    groups.reverse();
                 }
             }
         }
-        for (let i: number = 0; i < fingerings.length; i++) {
-            const fingering: TechnicalInstruction = fingerings[i];
+        for (let i: number = 0; i < groups.length; i++) {
+            const group: FingeringInstructionGroup = groups[i];
+            const fingering: TechnicalInstruction = group.instructions[0];
             const alignment: TextAlignmentEnum =
                 placement === PlacementEnum.Above ? TextAlignmentEnum.CenterBottom : TextAlignmentEnum.CenterTop;
-            const label: Label = new Label(fingering.value, alignment);
-            const gLabel: GraphicalLabel = new GraphicalLabel(
-                label, this.rules.FingeringTextSize, label.textAlignment, this.rules, line.PositionAndShape);
+            const label: Label = new Label(
+                group.instructions.map((instruction: TechnicalInstruction): string => instruction.value).join("\u2009"),
+                alignment,
+            );
+            const gLabel: GraphicalFingeringEntry = new GraphicalFingeringEntry(
+                label,
+                this.rules.FingeringTextSize,
+                label.textAlignment,
+                this.rules,
+                line.PositionAndShape,
+                group.sourceNote,
+                placement,
+                group.isSubstitution,
+            );
             if (fingering.fontFamily) {
                 label.fontFamily = fingering.fontFamily;
             }
-            const marginLeft: number = staffEntryPositionX + gLabel.PositionAndShape.BorderMarginLeft;
-            const marginRight: number = staffEntryPositionX + gLabel.PositionAndShape.BorderMarginRight;
+            gLabel.setLabelPositionAndShapeBorders();
+            gLabel.includeSubstitutionArcInBounds();
+            const sourceNoteAnchorOffset: number | undefined =
+                gse.getNoteheadCenterAnchorOffsetForSourceNote(group.sourceNote);
+            const anchorX: number = staffEntryPositionX + (sourceNoteAnchorOffset ?? 0);
+            const marginLeft: number = anchorX + gLabel.PositionAndShape.BorderMarginLeft;
+            const marginRight: number = anchorX + gLabel.PositionAndShape.BorderMarginRight;
             const skybottomFurthest: number = placement === PlacementEnum.Above
                 ? skybottomcalculator.getSkyLineMinInRange(marginLeft, marginRight)
                 : skybottomcalculator.getBottomLineMaxInRange(marginLeft, marginRight);
@@ -3531,8 +3566,7 @@ export abstract class MusicSheetCalculator {
                 yShift *= -1;
             }
             gLabel.PositionAndShape.RelativePosition.y += skybottomFurthest + yShift;
-            gLabel.PositionAndShape.RelativePosition.x = staffEntryPositionX;
-            gLabel.setLabelPositionAndShapeBorders();
+            gLabel.PositionAndShape.RelativePosition.x = anchorX;
             gLabel.PositionAndShape.calculateBoundingBox();
             gse.FingeringEntries.push(gLabel);
             const start: number = gLabel.PositionAndShape.RelativePosition.x + gLabel.PositionAndShape.BorderLeft;

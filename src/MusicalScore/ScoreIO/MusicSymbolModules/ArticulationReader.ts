@@ -230,6 +230,7 @@ export class ArticulationReader {
       // if nodeFingerings.length > 1: isBulkFingering = true in MusicSheetCalculator
       const currentTechnicalInstruction: TechnicalInstruction = this.createTechnicalInstruction(nodeFingering, currentNote);
       currentTechnicalInstruction.type = TechnicalInstructionType.Fingering;
+      currentTechnicalInstruction.substitution = nodeFingering.attribute("substitution")?.value === "yes";
       if (!currentNote.Fingering) {
         currentNote.Fingering = currentTechnicalInstruction;
       }

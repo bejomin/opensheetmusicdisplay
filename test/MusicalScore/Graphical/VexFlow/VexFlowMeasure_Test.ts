@@ -29,6 +29,11 @@ import { AccidentalEnum } from "../../../../src/Common/DataObjects/Pitch";
 import { PlacementEnum } from "../../../../src/MusicalScore/VoiceData/Expressions/AbstractExpression";
 import * as VF from "../../../../src/MusicalScore/Graphical/VexFlow/VexFlowAdapter";
 import { unitInPixels } from "../../../../src/MusicalScore/Graphical/VexFlow/VexFlowMusicSheetDrawer";
+import { GraphicalFingeringEntry } from "../../../../src/MusicalScore/Graphical/GraphicalFingeringEntry";
+import { TechnicalInstruction, TechnicalInstructionType } from
+   "../../../../src/MusicalScore/VoiceData/Instructions/TechnicalInstruction";
+import { VexFlowFingeringModifier } from
+   "../../../../src/MusicalScore/Graphical/VexFlow/VexFlowFingeringModifier";
 
 describe("VexFlow Measure", () => {
 
@@ -591,7 +596,8 @@ describe("VexFlow Measure", () => {
 
    it("places automatic chord fingerings left while preserving explicit below placement", async (): Promise<void> => {
       const score: Document = TestUtils.getScore("test_fingering_Simple_Chords_Treble_Bass.musicxml");
-      const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+      const container: HTMLElement = TestUtils.getDivElement(document);
+      const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(container);
       osmd.EngravingRules.FingeringPosition = PlacementEnum.NotYetDefined;
 
       await osmd.load(score);
@@ -616,6 +622,27 @@ describe("VexFlow Measure", () => {
          (fingering: VF.FretHandFinger): boolean => fingering.fontSizeInPixels === expectedFingeringSizePx,
       ), "side fingerings use OSMD's configured fingering text size").to.equal(true);
       expect(trebleVexNote.getMetrics().modLeftPx, "left fingerings reserve horizontal space").to.be.greaterThan(0);
+      expect(
+         container.querySelectorAll('text[fill="#FFFFFF"]').length,
+         "in-staff left fingerings receive a small white staff-line knockout",
+      ).to.be.greaterThan(0);
+      const firstHeadBounds: VF.BoundingBox = trebleVexNote.getNoteHeadBoundingBox(0);
+      const leftFingeringGlyphs: SVGTextElement[] = Array.from(container.querySelectorAll("text"))
+         .filter((element: SVGTextElement): boolean => {
+            const x: number = Number(element.getAttribute("x"));
+            return ["1", "3", "5"].includes(element.textContent) &&
+               element.getAttribute("fill") !== "#FFFFFF" &&
+               x < firstHeadBounds.getX() && x > firstHeadBounds.getX() - 40;
+         });
+      expect(leftFingeringGlyphs, "foreground left-fingering column is discoverable").to.have.length(3);
+      const verticalBaselines: number[] = leftFingeringGlyphs
+         .map((element: SVGTextElement): number => Number(element.getAttribute("y")))
+         .sort((left: number, right: number): number => left - right);
+      for (let index: number = 1; index < verticalBaselines.length; index++) {
+         expect(verticalBaselines[index] - verticalBaselines[index - 1],
+            "vertically adjacent left fingerings receive more than one staff-space of separation")
+            .to.be.greaterThan(10);
+      }
       expect(
          bassEntry.FingeringEntries.map((entry: GraphicalLabel): string => entry.Label.text).sort(),
          "explicit below fingerings stay in OSMD's skyline-aware label path",
@@ -645,6 +672,131 @@ describe("VexFlow Measure", () => {
       const rerenderedNote: VF.StaveNote =
          (rerenderedTreble.staffEntries[0].graphicalVoiceEntries[0] as VexFlowVoiceEntry).vfStaveNote as VF.StaveNote;
       expect(rerenderedNote.getMetrics().modLeftPx).to.be.closeTo(firstLeftExtent, 0.001);
+   });
+
+   it("renders the left-fingering knockout through the canvas backend", async (): Promise<void> => {
+      const canvas: HTMLCanvasElement = document.createElement("canvas");
+      canvas.width = 320;
+      canvas.height = 160;
+      const rawContext: CanvasRenderingContext2D = canvas.getContext("2d");
+      const originalFillText: typeof rawContext.fillText = rawContext.fillText.bind(rawContext);
+      const whiteTextPasses: {x: number, y: number}[] = [];
+      rawContext.fillText = ((text: string, x: number, y: number, maxWidth?: number): void => {
+         if (String(rawContext.fillStyle).toLowerCase() === "#ffffff") {
+            whiteTextPasses.push({x, y});
+         }
+         if (maxWidth === undefined) {
+            originalFillText(text, x, y);
+         } else {
+            originalFillText(text, x, y, maxWidth);
+         }
+      }) as typeof rawContext.fillText;
+
+      const renderer: VF.Renderer = new VF.Renderer(canvas, VF.Renderer.Backends.CANVAS);
+      renderer.resize(canvas.width, canvas.height);
+      const context: VF.RenderContext = renderer.getContext();
+      const stave: VF.Stave = new VF.Stave(10, 30, 280);
+      stave.setContext(context).draw();
+      const note: VF.StaveNote = new VF.StaveNote({keys: ["b/4"], duration: "q"});
+      const fingering: VexFlowFingeringModifier = new VexFlowFingeringModifier("3")
+         .setPosition(VF.Modifier.Position.LEFT)
+         .setNoteheadClearance(2);
+      note.addModifier(fingering, 0);
+
+      VF.Formatter.FormatAndDraw(context, stave, [note]);
+
+      expect(whiteTextPasses, "Canvas receives the eight small white glyph-shaped knockout passes")
+         .to.have.length(8);
+      expect(Math.max(...whiteTextPasses.map((pass): number => pass.x)) -
+         Math.min(...whiteTextPasses.map((pass): number => pass.x)),
+      "the knockout extends 3px to either side of the glyph").to.equal(6);
+      expect(Math.max(...whiteTextPasses.map((pass): number => pass.y)) -
+         Math.min(...whiteTextPasses.map((pass): number => pass.y)),
+      "the knockout extends 3px above and below the glyph").to.equal(6);
+   });
+
+   it("renders ordinary and grace-note substitutions as centred horizontal groups", async (): Promise<void> => {
+      const score: Document = TestUtils.getScore("test_fingering_substitutions.musicxml");
+      const container: HTMLElement = TestUtils.getDivElement(document);
+      const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(container);
+      osmd.EngravingRules.FingeringPosition = PlacementEnum.NotYetDefined;
+
+      await osmd.load(score);
+      osmd.render();
+
+      const graphicalMeasures: GraphicalMeasure[] = osmd.GraphicSheet.MeasureList
+         .flatMap((measureList: GraphicalMeasure[]): GraphicalMeasure[] => measureList);
+      const parsedFingerings: TechnicalInstruction[] = graphicalMeasures
+         .flatMap((measure: GraphicalMeasure): GraphicalStaffEntry[] => measure.staffEntries)
+         .flatMap((staffEntry: GraphicalStaffEntry): GraphicalVoiceEntry[] => staffEntry.graphicalVoiceEntries)
+         .flatMap((voiceEntry: GraphicalVoiceEntry): TechnicalInstruction[] =>
+            voiceEntry.parentVoiceEntry.TechnicalInstructions)
+         .filter((instruction: TechnicalInstruction): boolean =>
+            instruction.type === TechnicalInstructionType.Fingering);
+      expect(parsedFingerings.filter((instruction: TechnicalInstruction): boolean => instruction.substitution))
+         .to.have.length(4);
+
+      const normalGroups: GraphicalFingeringEntry[] = graphicalMeasures
+         .flatMap((measure: GraphicalMeasure): GraphicalStaffEntry[] => measure.staffEntries)
+         .flatMap((staffEntry: GraphicalStaffEntry): GraphicalFingeringEntry[] => staffEntry.FingeringEntries)
+         .filter((entry: GraphicalFingeringEntry): boolean => entry.IsSubstitution);
+      expect(normalGroups.map((entry: GraphicalFingeringEntry): string => entry.Label.text).sort())
+         .to.deep.equal(["2\u20091", "3\u20094"]);
+
+      const displacedChordFingerings: GraphicalFingeringEntry[] = graphicalMeasures[0].staffEntries
+         .flatMap((staffEntry: GraphicalStaffEntry): GraphicalFingeringEntry[] => staffEntry.FingeringEntries)
+         .filter((entry: GraphicalFingeringEntry): boolean =>
+            !entry.IsSubstitution && (entry.Label.text === "1" || entry.Label.text === "2"));
+      expect(displacedChordFingerings, "fixture exposes both heads of the displaced-second chord")
+         .to.have.length(2);
+      const chordFingeringXs: number[] = [];
+      for (const fingering of displacedChordFingerings) {
+         const owningEntry: GraphicalStaffEntry = graphicalMeasures[0].staffEntries
+            .find((staffEntry: GraphicalStaffEntry): boolean => staffEntry.FingeringEntries.includes(fingering));
+         const noteheadOffset: number = owningEntry.getNoteheadCenterAnchorOffsetForSourceNote(fingering.SourceNote);
+         const expectedX: number = owningEntry.parentMeasure.PositionAndShape.RelativePosition.x +
+            owningEntry.PositionAndShape.RelativePosition.x + noteheadOffset;
+         expect(fingering.PositionAndShape.RelativePosition.x,
+            "each chord fingering is centred on its own rendered notehead")
+            .to.be.closeTo(expectedX, 0.001);
+         chordFingeringXs.push(fingering.PositionAndShape.RelativePosition.x);
+      }
+      expect(Math.abs(chordFingeringXs[0] - chordFingeringXs[1]),
+         "displaced noteheads receive distinct fingering centres").to.be.greaterThan(0.01);
+
+      for (const group of normalGroups) {
+         const owningEntry: GraphicalStaffEntry = graphicalMeasures
+            .flatMap((measure: GraphicalMeasure): GraphicalStaffEntry[] => measure.staffEntries)
+            .find((staffEntry: GraphicalStaffEntry): boolean => staffEntry.FingeringEntries.includes(group));
+         const offset: number = owningEntry.getNoteheadCenterAnchorOffsetForSourceNote(group.SourceNote);
+         const expectedX: number = owningEntry.parentMeasure.PositionAndShape.RelativePosition.x +
+            owningEntry.PositionAndShape.RelativePosition.x + offset;
+         expect(group.PositionAndShape.RelativePosition.x, "complete substitution group is centred on its notehead")
+            .to.be.closeTo(expectedX, 0.001);
+         expect(group.SubstitutionArcSVGNode, "substitution group has a rendered arc").to.not.equal(undefined);
+         if (group.Placement === PlacementEnum.Above) {
+            expect(group.PositionAndShape.BorderTop).to.be.lessThan(-osmd.EngravingRules.FingeringTextSize);
+         } else {
+            expect(group.PositionAndShape.BorderBottom).to.be.greaterThan(osmd.EngravingRules.FingeringTextSize);
+         }
+      }
+
+      const graceModifiers: VexFlowFingeringModifier[] = graphicalMeasures
+         .flatMap((measure: GraphicalMeasure): GraphicalStaffEntry[] => measure.staffEntries)
+         .flatMap((staffEntry: GraphicalStaffEntry): GraphicalVoiceEntry[] => staffEntry.graphicalVoiceEntries)
+         .filter((voiceEntry: GraphicalVoiceEntry): boolean => voiceEntry.parentVoiceEntry.IsGrace)
+         .flatMap((voiceEntry: GraphicalVoiceEntry): VF.Modifier[] =>
+            (voiceEntry as VexFlowVoiceEntry).vfStaveNote.getModifiers())
+         .filter((modifier: VF.Modifier): modifier is VexFlowFingeringModifier =>
+            modifier instanceof VexFlowFingeringModifier);
+      expect(graceModifiers).to.have.length(2);
+      expect(graceModifiers.every((modifier: VexFlowFingeringModifier): boolean => modifier.IsSubstitution))
+         .to.equal(true);
+      expect(graceModifiers.map((modifier: VexFlowFingeringModifier): string =>
+         modifier.getFretHandFinger()).sort()).to.deep.equal(["1\u20092", "3\u20094"]);
+      expect(graceModifiers.every((modifier: VexFlowFingeringModifier): boolean =>
+         modifier.fontSizeInPixels < osmd.EngravingRules.FingeringTextSize * unitInPixels),
+      "grace fingering groups retain their reduced scale").to.equal(true);
    });
 
    // Non-regression test for the stacking order of fingerings collected from multiple voices.

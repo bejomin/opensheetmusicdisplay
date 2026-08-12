@@ -9,6 +9,8 @@ import { Note } from "../../VoiceData/Note";
 import { AccidentalEnum } from "../../../Common/DataObjects/Pitch";
 import { BoundingBox } from "../BoundingBox";
 import { LyricAlignmentMode } from "../../VoiceData/Lyrics/LyricsEntry";
+import { GraphicalFingeringEntry } from "../GraphicalFingeringEntry";
+import { VexFlowGraphicalNote } from "./VexFlowGraphicalNote";
 
 export class VexFlowStaffEntry extends GraphicalStaffEntry {
     constructor(measure: VexFlowMeasure, sourceStaffEntry: SourceStaffEntry, staffEntryParent: VexFlowStaffEntry) {
@@ -78,6 +80,7 @@ export class VexFlowStaffEntry extends GraphicalStaffEntry {
         this.PositionAndShape.RelativePosition.x -= lastBorderLeft;
         this.synchronizeLyricAnchorOffsets(stave);
         this.synchronizeChordSymbolAnchorOffsets(stave);
+        this.synchronizeFingeringAnchorOffsets(stave);
         // TODO sometimes subtracting lastBorderLeft fixes the x-position for lyrics spacing, sometimes it makes it wrong
         //   e.g. wrong for Beethoven Geliebte measure 1 ("auf - dem", distance < width of "auf"), correct for measure 3 ("spä - hend")
         //   this leads to a (lyrics) measure elongation of ~1.3 for measure 1, though it doesn't need any elongation (should be factor 1)
@@ -187,6 +190,53 @@ export class VexFlowStaffEntry extends GraphicalStaffEntry {
         }
         const anchorWithinMeasure: number = (Math.min(...centres) - stave.getX()) / unitInPixels;
         return anchorWithinMeasure - this.PositionAndShape.RelativePosition.x;
+    }
+
+    /** Return the visual centre of one rendered notehead, including any chord
+     * displacement, relative to this staff entry. */
+    public override getNoteheadCenterAnchorOffsetForSourceNote(
+        sourceNote: Note,
+        stave: VF.Stave = (this.parentMeasure as VexFlowMeasure).getVFStave(),
+    ): number | undefined {
+        for (const voiceEntry of this.graphicalVoiceEntries as VexFlowVoiceEntry[]) {
+            const graphicalNote: VexFlowGraphicalNote = voiceEntry.notes.find(
+                (candidate: GraphicalNote): boolean => candidate.sourceNote === sourceNote,
+            ) as VexFlowGraphicalNote;
+            const staveNote: VF.StaveNote = graphicalNote?.vfnote?.[0] as VF.StaveNote;
+            if (!graphicalNote || !(staveNote as any)?.tickContext || staveNote.isRest?.()) {
+                continue;
+            }
+            const bounds: VF.BoundingBox = staveNote.getNoteHeadBoundingBox?.(graphicalNote.vfnoteIndex);
+            if (!bounds) {
+                continue;
+            }
+            const centerX: number = bounds.getX() + bounds.getW() / 2;
+            if (!Number.isFinite(centerX)) {
+                continue;
+            }
+            const anchorWithinMeasure: number = (centerX - stave.getX()) / unitInPixels;
+            return anchorWithinMeasure - this.PositionAndShape.RelativePosition.x;
+        }
+        return undefined;
+    }
+
+    /** Synchronize skyline-aware fingerings after VexFlow has finalized chord
+     * head displacement and its draw-time positional correction. */
+    public synchronizeFingeringAnchorOffsets(
+        stave: VF.Stave = (this.parentMeasure as VexFlowMeasure).getVFStave(),
+    ): void {
+        for (const fingeringEntry of this.FingeringEntries as GraphicalFingeringEntry[]) {
+            const anchorOffsetX: number | undefined =
+                this.getNoteheadCenterAnchorOffsetForSourceNote(fingeringEntry.SourceNote, stave);
+            if (anchorOffsetX === undefined || !Number.isFinite(anchorOffsetX)) {
+                continue;
+            }
+            fingeringEntry.PositionAndShape.RelativePosition.x =
+                this.parentMeasure.PositionAndShape.RelativePosition.x +
+                this.PositionAndShape.RelativePosition.x +
+                anchorOffsetX;
+            fingeringEntry.PositionAndShape.calculateBoundingBox();
+        }
     }
 
     /**

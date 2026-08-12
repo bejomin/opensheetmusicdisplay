@@ -37,6 +37,7 @@ import { VexFlowGraphicalNote } from "./VexFlowGraphicalNote";
 import { VexFlowVibratoBracket } from "./VexFlowVibratoBracket";
 import { TremoloBetweenNotes } from "../../VoiceData/Note";
 import { SkyBottomLineCalculator } from "../SkyBottomLineCalculator";
+import { GraphicalFingeringEntry } from "../GraphicalFingeringEntry";
 
 /**
  * This is a global constant which denotes the height in pixels of the space between two lines of the stave
@@ -692,6 +693,10 @@ export class VexFlowMusicSheetDrawer extends MusicSheetDrawer {
         if (staffEntry.FingeringEntries.length > 0) {
             for (const fingeringEntry of staffEntry.FingeringEntries) {
                 fingeringEntry.SVGNode = this.drawLabel(fingeringEntry, GraphicalLayers.Notes);
+                if (fingeringEntry.IsSubstitution) {
+                    fingeringEntry.SubstitutionArcSVGNode =
+                        this.drawFingeringSubstitutionArc(fingeringEntry);
+                }
             }
         }
         // Draw ChordSymbols
@@ -724,6 +729,36 @@ export class VexFlowMusicSheetDrawer extends MusicSheetDrawer {
                 this.drawLyrics(staffEntry.LyricsEntries, <number>GraphicalLayers.Notes);
             }
         }
+    }
+
+    private drawFingeringSubstitutionArc(entry: GraphicalFingeringEntry): Node {
+        const absolute: PointF2D = entry.PositionAndShape.AbsolutePosition;
+        const box: typeof entry.PositionAndShape = entry.PositionAndShape;
+        const gap: number = GraphicalFingeringEntry.SubstitutionArcGap;
+        const height: number = GraphicalFingeringEntry.SubstitutionArcHeight;
+        const thickness: number = GraphicalFingeringEntry.SubstitutionArcThickness;
+        const totalExtent: number = gap + height + thickness;
+        const direction: number = entry.Placement === PlacementEnum.Above ? -1 : 1;
+        const textEdgeY: number = entry.Placement === PlacementEnum.Above
+            ? absolute.y + box.BorderTop + totalExtent
+            : absolute.y + box.BorderBottom - totalExtent;
+        const endY: number = textEdgeY + direction * (gap + thickness / 2);
+        const apexY: number = endY + direction * height;
+        const left: number = absolute.x + box.BorderLeft + 0.05;
+        const right: number = absolute.x + box.BorderRight - 0.05;
+        const controlInset: number = (right - left) * 0.22;
+        const outerOffset: number = direction * thickness / 2;
+        const points: PointF2D[] = [
+            new PointF2D(left, endY + outerOffset),
+            new PointF2D(left + controlInset, apexY + outerOffset),
+            new PointF2D(right - controlInset, apexY + outerOffset),
+            new PointF2D(right, endY + outerOffset),
+            new PointF2D(left, endY - outerOffset),
+            new PointF2D(left + controlInset, apexY - outerOffset),
+            new PointF2D(right - controlInset, apexY - outerOffset),
+            new PointF2D(right, endY - outerOffset),
+        ].map((point: PointF2D): PointF2D => this.applyScreenTransformation(point));
+        return this.backend.renderCurve(points);
     }
 
     /**

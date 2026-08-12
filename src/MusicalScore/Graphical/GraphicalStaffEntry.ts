@@ -18,8 +18,8 @@ import {CollectionUtil} from "../../Util/CollectionUtil";
 import { GraphicalVoiceEntry } from "./GraphicalVoiceEntry";
 import { MusicSheetCalculator } from "./MusicSheetCalculator";
 import { Tie } from "../VoiceData/Tie";
-import { GraphicalLabel } from "./GraphicalLabel";
 import { SkyBottomLineCalculator } from "./SkyBottomLineCalculator";
+import { GraphicalFingeringEntry } from "./GraphicalFingeringEntry";
 
 /**
  * The graphical counterpart of a [[SourceStaffEntry]].
@@ -60,7 +60,7 @@ export abstract class GraphicalStaffEntry extends GraphicalObject {
     public ties: Tie[] = [];
     private graphicalTies: GraphicalTie[] = [];
     private lyricsEntries: GraphicalLyricEntry[] = [];
-    public FingeringEntries: GraphicalLabel[];
+    public FingeringEntries: GraphicalFingeringEntry[];
 
     public get GraphicalInstructions(): AbstractGraphicalInstruction[] {
         return this.graphicalInstructions;
@@ -76,6 +76,11 @@ export abstract class GraphicalStaffEntry extends GraphicalObject {
 
     public set LyricsEntries(value: GraphicalLyricEntry[]) {
         this.lyricsEntries = value;
+    }
+
+    /** Renderer-specific visual centre for one source notehead. */
+    public getNoteheadCenterAnchorOffsetForSourceNote(_sourceNote: Note): number | undefined {
+        return undefined;
     }
 
     /**

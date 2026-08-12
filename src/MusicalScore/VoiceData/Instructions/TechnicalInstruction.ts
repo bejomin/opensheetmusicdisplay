@@ -10,6 +10,10 @@ export class TechnicalInstruction {
     public value: string;
     public placement: PlacementEnum;
     public sourceNote: Note;
+    /** MusicXML `substitution="yes"`: this fingering replaces the preceding
+     * fingering during the held note rather than representing another stacked
+     * fingering. */
+    public substitution: boolean = false;
     /** To be able to set fontFamily for fingerings, e.g. (after load, before render):
      * osmd.cursor.GNotesUnderCursor()[0].parentVoiceEntry.parentVoiceEntry.TechnicalInstructions[0].fontFamily = "Comic Sans MS"
      * Note that staffEntry.FingeringInstructions is only created during render(),
