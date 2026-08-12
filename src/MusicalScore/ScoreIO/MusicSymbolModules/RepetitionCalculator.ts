@@ -259,8 +259,10 @@ export class RepetitionCalculator {
                 for (let idx: number = 0, len: number = currentRepetitionInstruction.endingIndices.length; idx < len; ++idx) {
                     const endingIndex: number = currentRepetitionInstruction.endingIndices[idx];
                     currentRepetition.RepetitonUnderConstruction.setEndingEndIndex(endingIndex, this.currentMeasureIndex);
-                    this.currentMeasure.LastRepetitionInstructions.push(currentRepetitionInstruction);
                 }
+                // The instruction represents the complete MusicXML ending, even when it applies to several passes.
+                // Add it once after recording each ending index so engraving creates only one terminal volta.
+                this.currentMeasure.LastRepetitionInstructions.push(currentRepetitionInstruction);
             }
             break;
         case RepetitionInstructionEnum.Segno:

@@ -3,6 +3,10 @@ import { IXmlElement } from "../../../src/Common/FileIO/Xml";
 import { MusicPartManagerIterator } from "../../../src/MusicalScore/MusicParts/MusicPartManagerIterator";
 import { MusicSheet } from "../../../src/MusicalScore/MusicSheet";
 import { MusicSheetReader } from "../../../src/MusicalScore/ScoreIO/MusicSheetReader";
+import {
+    RepetitionInstruction,
+    RepetitionInstructionEnum,
+} from "../../../src/MusicalScore/VoiceData/Instructions/RepetitionInstruction";
 import { TestUtils } from "../../Util/TestUtils";
 
 function readSheet(scoreName: string): MusicSheet {
@@ -50,10 +54,14 @@ describe("Music Sheet Repetition playback", () => {
 
     it("plays a shared first-through-fourth ending before the fifth ending", () => {
         const sheet: MusicSheet = readSheet("test_repeat_volta_display_range_1_4_5.musicxml");
+        const terminalEndingInstructions: RepetitionInstruction[] = sheet.SourceMeasures[1].LastRepetitionInstructions.filter(
+            (instruction): boolean => instruction.type === RepetitionInstructionEnum.Ending,
+        );
 
         expect(sheet.Repetitions.length).to.equal(1);
         expect(sheet.Repetitions[0].NumberOfEndings).to.equal(5);
         expect(sheet.Repetitions[0].UserNumberOfRepetitions).to.equal(5);
+        expect(terminalEndingInstructions).to.have.length(1);
         expect(collectMeasureTraversal(sheet)).to.deep.equal([
             1, 2,
             1, 2,
