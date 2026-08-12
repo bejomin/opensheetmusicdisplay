@@ -1170,7 +1170,7 @@ function scoreCandidate(
         context.end.seedAnchor.x - context.start.seedAnchor.x,
       );
       if (anchor.type === "stem-tip" && endpoint.chordSize > 1 && phraseWidth >= 10) {
-        penalty += 0.85;
+        penalty += 2.25;
       }
       if (anchor.type === "beam-side" && !context.sharedEndpointBeam && !context.isCrossStaff) {
         penalty += 0.45;

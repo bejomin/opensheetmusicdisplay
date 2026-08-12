@@ -461,6 +461,7 @@ describe("candidate slur layout engine", (): void => {
     );
 
     expect(stemTip.score.anchorDisplacement).to.be.greaterThan(crown.score.anchorDisplacement);
+    expect(result.selectedCandidateId).to.not.equal(stemTip.id);
   });
 
   it("favours a lateral shoulder at a ledger-lined endpoint", (): void => {
