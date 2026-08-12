@@ -1847,7 +1847,7 @@ function lyricPairConstraint(
 }
 
 function lyricSpacingFootprint(lyric: CandidateLyric): LyricFootprint {
-  return lyric.entry.getFootprint();
+  return lyric.entry.getBodyFootprint();
 }
 
 function lyricLeftOffsetPx(lyric: CandidateLyric, footprint: LyricFootprint): number {
@@ -2071,7 +2071,7 @@ function findOwningVoiceEntry(
 }
 
 function isVisibleLyric(entry: GraphicalLyricEntry): boolean {
-  return !!(entry.LyricsEntry.LyricText?.trim() || entry.LyricsEntry.StanzaNumberPrefix?.trim());
+  return !!entry.LyricsEntry.LyricText?.trim();
 }
 
 function participatesInLyricSpacing(entry: GraphicalLyricEntry): boolean {

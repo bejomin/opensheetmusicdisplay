@@ -19,6 +19,7 @@ import { OrnamentContainer } from "../VoiceData/OrnamentContainer";
 import { Articulation } from "../VoiceData/Articulation";
 import { Tuplet } from "../VoiceData/Tuplet";
 import { MusicSystem } from "./MusicSystem";
+import { applyAutomaticLyricNumbering } from "./AutomaticLyricNumbering";
 import { GraphicalTie } from "./GraphicalTie";
 import { RepetitionInstruction, RepetitionInstructionEnum, AlignmentType } from "../VoiceData/Instructions/RepetitionInstruction";
 import { MultiExpression, MultiExpressionEntry } from "../VoiceData/Expressions/MultiExpression";
@@ -1010,6 +1011,8 @@ export abstract class MusicSheetCalculator {
             this.horizontalSystemSpacingPlanner,
         );
         this.musicSystems = musicSystemBuilder.buildMusicSystems();
+
+        applyAutomaticLyricNumbering(this.musicSystems);
 
         this.formatMeasures();
 

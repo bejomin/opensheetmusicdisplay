@@ -27,7 +27,7 @@ export interface LyricFootprint {
 class GraphicalLyricLabel extends GraphicalLabel {
     private bodyLeftOffset: number = 0;
     private bodyRightOffset: number = 0;
-    private readonly stanzaNumberPrefix: string;
+    private stanzaNumberPrefix: string;
 
     constructor(
         label: Label,
@@ -38,6 +38,10 @@ class GraphicalLyricLabel extends GraphicalLabel {
         stanzaNumberPrefix: string,
     ) {
         super(label, textHeight, alignment, rules, parent);
+        this.stanzaNumberPrefix = stanzaNumberPrefix;
+    }
+
+    public setStanzaNumberPrefix(stanzaNumberPrefix: string): void {
         this.stanzaNumberPrefix = stanzaNumberPrefix;
     }
 
@@ -109,23 +113,15 @@ export class GraphicalLyricEntry {
             lyricsEntry.AlignmentMode === LyricAlignmentMode.MelismaLeft
                 ? TextAlignmentEnum.LeftBottom
                 : rules.LyricsAlignmentStandard;
-        const label: Label = new Label(lyricsEntry.Text);
+        const label: Label = new Label(lyricsEntry.LyricText);
         label.fontStyle = lyricsEntry.FontStyle;
-        if (lyricsEntry.StanzaNumberPrefix) {
-            label.textLines = [{
-                runs: [
-                    { text: lyricsEntry.StanzaNumberPrefix },
-                    { text: lyricsEntry.LyricText },
-                ],
-            }];
-        }
         this.graphicalLabel = new GraphicalLyricLabel(
             label,
             lyricsHeight,
             lyricsTextAlignment,
             rules,
             graphicalStaffEntry.PositionAndShape,
-            lyricsEntry.StanzaNumberPrefix,
+            "",
         );
         this.graphicalLabel.Label.colorDefault = rules.DefaultColorLyrics; // if undefined, no change. saves an if check
         this.graphicalLabel.PositionAndShape.RelativePosition = new PointF2D(0, staffHeight);
@@ -138,6 +134,26 @@ export class GraphicalLyricEntry {
             this.graphicalLabel.SvgTextAnchor = "start";
         }
         this.graphicalLabel.setLabelPositionAndShapeBorders(); // needed to have Size.width
+    }
+
+    /**
+     * Apply a renderer-derived stanza number without changing the MusicXML lyric.
+     * The number hangs left of the body, whose note-relative anchor remains stable.
+     */
+    public setDisplayStanzaNumberPrefix(stanzaNumberPrefix: string): void {
+        const prefix: string = stanzaNumberPrefix || "";
+        const label: Label = this.graphicalLabel.Label;
+        label.text = `${prefix}${this.lyricsEntry.LyricText}`;
+        label.textLines = prefix
+            ? [{
+                runs: [
+                    { text: prefix },
+                    { text: this.lyricsEntry.LyricText },
+                ],
+            }]
+            : undefined;
+        (this.graphicalLabel as GraphicalLyricLabel).setStanzaNumberPrefix(prefix);
+        this.graphicalLabel.setLabelPositionAndShapeBorders();
     }
 
     public hasDashFromLyricWord(): boolean {

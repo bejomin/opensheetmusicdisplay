@@ -144,7 +144,7 @@ export class LyricsEntry {
 
     private setTextAndStanzaPrefix(value: string): void {
         this.text = value ?? "";
-        const stanzaMatch: RegExpMatchArray = this.text.match(/^(\d+[.)][\s\u00a0]+)(\S.*)$/u);
+        const stanzaMatch: RegExpMatchArray = this.text.match(/^(\d+[.)][\s\u00a0]+)(.*)$/u);
         this.stanzaNumberPrefix = stanzaMatch?.[1] ?? "";
         this.lyricText = stanzaMatch?.[2] ?? this.text;
     }

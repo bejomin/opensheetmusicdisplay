@@ -182,6 +182,10 @@ describe("LyricsReader semantics", () => {
         it("hangs a stanza prefix left without moving the lyric body's note anchor", (): void => {
             const ordinary: GraphicalLyricEntry = graphicalEntry(lyricAt(0, "2"));
             const melismatic: GraphicalLyricEntry = graphicalEntry(lyricAt(0, "3"));
+            expect(ordinary.GraphicalLabel.Label.text).to.equal("Or");
+            expect(ordinary.getFootprint(10)).to.deep.equal(ordinary.getBodyFootprint(10));
+            ordinary.setDisplayStanzaNumberPrefix("2. ");
+            melismatic.setDisplayStanzaNumberPrefix("3. ");
             const ordinaryBody: LyricFootprint = ordinary.getBodyFootprint(10);
             const ordinaryFull: LyricFootprint = ordinary.getFootprint(10);
             const melismaticBody: LyricFootprint = melismatic.getBodyFootprint(10);
