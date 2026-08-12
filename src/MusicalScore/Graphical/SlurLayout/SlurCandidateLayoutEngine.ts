@@ -269,18 +269,27 @@ export function generateSlurAnchors(
         );
       }
     }
-    if (endpoint.beams.length > 0) {
-      const x: number = endpoint.stem
-        ? (endpoint.stem.left + endpoint.stem.right) / 2 + (side === "start" ? 0.08 : -0.08)
-        : seedPoint.x;
-      const beamEdge: number =
+    if (endpoint.beamSideAnchor || endpoint.beams.length > 0) {
+      const x: number = endpoint.beamSideAnchor?.x ?? (endpoint.stem
+        ? (endpoint.stem.left + endpoint.stem.right) / 2
+        : seedPoint.x);
+      const beamEdge: number = endpoint.beamSideAnchor?.y ?? (
         direction < 0
           ? Math.min(...endpoint.beams.map((beam) => beam.top))
-          : Math.max(...endpoint.beams.map((beam) => beam.bottom));
+          : Math.max(...endpoint.beams.map((beam) => beam.bottom))
+      );
       const y: number = beamEdge + direction * endpointGap;
       const displacement: number = Math.hypot(x - seedPoint.x, y - seedPoint.y);
       result[side].push(
-        makeAnchor(context, side, x, y, "beam-side", generationIndex++, displacement * 0.12),
+        makeAnchor(
+          context,
+          side,
+          x,
+          y,
+          "beam-side",
+          generationIndex++,
+          displacement * (context.sharedEndpointBeam || context.isCrossStaff ? 0.015 : 0.12),
+        ),
       );
     }
     if (endpoint.stem && endpoint.stemSide) {
@@ -298,6 +307,8 @@ export function generateSlurAnchors(
         context.isNested;
       const displacementPenalty: number = avoidRemoteCompactStem
         ? displacement + 0.85
+        : (context.sharedEndpointBeam || context.isCrossStaff) && endpoint.beamSideAnchor
+          ? Math.min(displacement * 0.04, 0.12) + 0.35
         : Math.min(displacement * 0.04, 0.12);
       result[side].push(
         makeAnchor(
@@ -474,12 +485,16 @@ function requiredObstacleBow(
     // polyphonic head without endpoint metadata. The exact evaluator still
     // rejects a curve that actually crosses it; this only prevents a local
     // object from demanding an implausibly steep phrase-wide bow.
-    const localStartObstacle: boolean = obstacle.type !== "accidental" &&
+    const belongsToStartEndpoint: boolean = obstacle.endpoint === "start" || obstacle.endpoint === "both";
+    const belongsToEndEndpoint: boolean = obstacle.endpoint === "end" || obstacle.endpoint === "both";
+    const localStartObstacle: boolean = (!context.isCrossStaff || belongsToStartEndpoint)
+      && obstacle.type !== "accidental" &&
       obstacle.bounds.right <= Math.max(
         start.x,
         context.start.notehead?.right ?? start.x,
       ) + obstacle.clearance;
-    const localEndObstacle: boolean = obstacle.type !== "accidental" &&
+    const localEndObstacle: boolean = (!context.isCrossStaff || belongsToEndEndpoint)
+      && obstacle.type !== "accidental" &&
       obstacle.bounds.left >= Math.min(
         end.x,
         context.end.notehead?.left ?? end.x,
@@ -487,8 +502,20 @@ function requiredObstacleBow(
     if (localStartObstacle || localEndObstacle) {
       continue;
     }
-    const left: number = Math.max(start.x, obstacle.bounds.left);
-    const right: number = Math.min(end.x, obstacle.bounds.right);
+    let left: number = Math.max(start.x, obstacle.bounds.left);
+    let right: number = Math.min(end.x, obstacle.bounds.right);
+    if (belongsToStartEndpoint) {
+      left = Math.max(
+        left,
+        Math.max(start.x, context.start.notehead?.right ?? start.x) + obstacle.clearance,
+      );
+    }
+    if (belongsToEndEndpoint) {
+      right = Math.min(
+        right,
+        Math.min(end.x, context.end.notehead?.left ?? end.x) - obstacle.clearance,
+      );
+    }
     if (right <= left) {
       continue;
     }

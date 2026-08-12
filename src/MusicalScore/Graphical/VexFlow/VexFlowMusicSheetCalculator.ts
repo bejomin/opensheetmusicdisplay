@@ -77,6 +77,7 @@ import { VexFlowSystemSpacingPlanner } from "./VexFlowHorizontalSpacing";
 import { calculateLinkedSlurLayouts } from "../SlurLayout/SlurLinkedLayoutEngine";
 import { SlurLinkedLayoutInput, SlurLinkedLayoutOutput } from "../SlurLayout/SlurLinkedLayoutEngine";
 import { SlurCurveGeometry, SlurLayoutContext } from "../SlurLayout/SlurLayoutTypes";
+import { GraphicalMusicSheet } from "../GraphicalMusicSheet";
 
 interface ContainerEntryInfo {
   anchorX?: number;
@@ -98,6 +99,8 @@ type ContainerOverflows = Record<string, number>;
 
 export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
   public beamsNeedUpdate: boolean = false;
+  /** Source beams whose notes move between staves, assembled once and drawn by a single owning measure. */
+  private crossStaffBeams: Map<Beam, VexFlowVoiceEntry[]> = new Map<Beam, VexFlowVoiceEntry[]>();
   /** Per-staff overflow of the previous measure's final chord symbol. */
   private previousChordOverflowsByStaff: Map<Staff, ContainerOverflows> = new Map<Staff, ContainerOverflows>();
 
@@ -108,6 +111,11 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
     MusicSheetCalculator.TextMeasurer = new VexFlowTextMeasurer(this.rules);
     MusicSheetCalculator.stafflineNoteCalculator = new VexflowStafflineNoteCalculator(this.rules);
 
+  }
+
+  public initialize(graphicalMusicSheet: GraphicalMusicSheet): void {
+    this.crossStaffBeams.clear();
+    super.initialize(graphicalMusicSheet);
   }
 
   protected clearRecreatedObjects(): void {
@@ -136,6 +144,7 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
       if (!firstVisibleMeasure) {
         continue;
       }
+      this.registerCrossStaffBeams(verticalMeasureList as VexFlowMeasure[]);
       // first measure has formatting method as lambda function object, but formats all measures. TODO this could be refactored
       firstVisibleMeasure.format();
       for (const measure of verticalMeasureList) {
@@ -2469,7 +2478,48 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
    * @param openBeams a list of all currently open beams
    */
   protected handleBeam(graphicalNote: GraphicalNote, beam: Beam, openBeams: Beam[]): void {
-    (graphicalNote.parentVoiceEntry.parentStaffEntry.parentMeasure as VexFlowMeasure).handleBeam(graphicalNote, beam);
+    const firstStaff: Staff = beam.Notes[0]?.ParentStaff;
+    const crossesStaff: boolean = beam.Notes.some((note): boolean => note.ParentStaff !== firstStaff);
+    if (!crossesStaff) {
+      (graphicalNote.parentVoiceEntry.parentStaffEntry.parentMeasure as VexFlowMeasure).handleBeam(graphicalNote, beam);
+      return;
+    }
+    let voiceEntries: VexFlowVoiceEntry[] = this.crossStaffBeams.get(beam);
+    if (!voiceEntries) {
+      voiceEntries = [];
+      this.crossStaffBeams.set(beam, voiceEntries);
+    }
+    const voiceEntry: VexFlowVoiceEntry = graphicalNote.parentVoiceEntry as VexFlowVoiceEntry;
+    if (!voiceEntries.includes(voiceEntry)) {
+      voiceEntries.push(voiceEntry);
+    }
+  }
+
+  /** Attach one cross-staff source beam to the measure containing its first rendered source note. */
+  private registerCrossStaffBeams(verticalMeasureList: VexFlowMeasure[]): void {
+    const measures: Set<VexFlowMeasure> = new Set(verticalMeasureList.filter((measure): boolean => !!measure));
+    for (const [beam, allVoiceEntries] of this.crossStaffBeams) {
+      const voiceEntries: VexFlowVoiceEntry[] = allVoiceEntries.filter(
+        (entry): boolean => measures.has(entry.parentStaffEntry.parentMeasure as VexFlowMeasure),
+      );
+      if (voiceEntries.length < 2) {
+        continue;
+      }
+      voiceEntries.sort((left: VexFlowVoiceEntry, right: VexFlowVoiceEntry): number =>
+        this.sourceBeamEntryIndex(beam, left) - this.sourceBeamEntryIndex(beam, right),
+      );
+      const owner: VexFlowMeasure = voiceEntries[0].parentStaffEntry.parentMeasure as VexFlowMeasure;
+      for (const voiceEntry of voiceEntries) {
+        owner.handleBeamVoiceEntry(voiceEntry, beam);
+      }
+    }
+  }
+
+  private sourceBeamEntryIndex(beam: Beam, voiceEntry: VexFlowVoiceEntry): number {
+    const indices: number[] = voiceEntry.notes.map((graphicalNote: GraphicalNote): number =>
+      beam.Notes.indexOf(graphicalNote.sourceNote),
+    ).filter((index: number): boolean => index >= 0);
+    return indices.length > 0 ? Math.min(...indices) : Number.MAX_SAFE_INTEGER;
   }
 
   protected handleVoiceEntryLyrics(voiceEntry: VoiceEntry, graphicalStaffEntry: GraphicalStaffEntry, lyricWords: LyricWord[]): void {
@@ -2876,6 +2926,7 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
 
   /** Calculate cross-staff slurs after the system builder has fixed both staves' y positions. */
   protected calculateCrossStaffSlursAfterSystemYLayout(): void {
+    this.finalizeBeamsAfterSystemYLayout();
     if (!this.rules.RenderSlursAcrossStaves) {
       return;
     }
@@ -2885,6 +2936,26 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
           if (graphicalSlur.slur.isCrossed()) {
             graphicalSlur.calculateCurveCrossStaff(this.rules);
           }
+        }
+      }
+    }
+  }
+
+  /** Give VexFlow the final relative staff positions before it fixes beam slopes and stem lengths. */
+  private finalizeBeamsAfterSystemYLayout(): void {
+    for (const musicSystem of this.musicSystems) {
+      for (const staffLine of musicSystem.StaffLines) {
+        for (const measure of staffLine.Measures as VexFlowMeasure[]) {
+          measure.setAbsoluteCoordinates(
+            (staffLine.PositionAndShape.RelativePosition.x
+              + measure.PositionAndShape.RelativePosition.x) * unitInPixels,
+            staffLine.PositionAndShape.RelativePosition.y * unitInPixels,
+          );
+        }
+      }
+      for (const staffLine of musicSystem.StaffLines) {
+        for (const measure of staffLine.Measures as VexFlowMeasure[]) {
+          measure.finalizeBeamGeometryForCurrentStavePositions();
         }
       }
     }

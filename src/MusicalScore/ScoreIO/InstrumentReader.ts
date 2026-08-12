@@ -26,7 +26,7 @@ import {StemDirectionType} from "../VoiceData/VoiceEntry";
 import {NoteType, NoteTypeHandler} from "../VoiceData/NoteType";
 import { SystemLinesEnumHelper } from "../Graphical/SystemLinesEnum";
 import { ReaderPluginManager } from "./ReaderPluginManager";
-import { TremoloInfo } from "../VoiceData/Note";
+import { Note, TremoloInfo } from "../VoiceData/Note";
 // import {Dictionary} from "typescript-collections";
 
 // FIXME: The following classes are missing
@@ -354,7 +354,7 @@ export class InstrumentReader {
           const [isCueNote, noteTypeXml] = this.getCueNoteAndNoteTypeXml(xmlNode);
 
           // check stem element
-          const [stemDirectionXml, stemColorXml, noteheadColorXml] = this.getStemDirectionAndColors(xmlNode);
+          const [stemDirectionXml, stemColorXml, noteheadColorXml, stemDefaultYXml] = this.getStemDirectionAndColors(xmlNode);
 
           // check Tremolo, Vibrato
           let tremoloInfo: TremoloInfo;
@@ -418,7 +418,7 @@ export class InstrumentReader {
             // (*) this.musicSheet.SheetPlaybackSetting.Rhythm = this.activeRhythm.Rhythm;
           }
           const dots: number = xmlNode.elements("dot").length;
-          this.currentVoiceGenerator.read(
+          const parsedNote: Note = this.currentVoiceGenerator.read(
             xmlNode, noteDuration, typeDuration, noteTypeXml, normalNotes, restNote,
             this.currentStaffEntry, this.currentMeasure,
             measureStartAbsoluteTimestamp,
@@ -426,6 +426,9 @@ export class InstrumentReader {
             printObject, isCueNote, isGraceNote, stemDirectionXml, tremoloInfo, stemColorXml, noteheadColorXml,
             dots
           );
+          if (parsedNote) {
+            parsedNote.StemDefaultYXml = stemDefaultYXml;
+          }
 
           // notationsNode created further up for multiple checks
           if (notationsNode !== undefined && notationsNode.element("dynamics")) {
@@ -595,12 +598,21 @@ export class InstrumentReader {
     return true;
   }
 
-  private getStemDirectionAndColors(xmlNode: IXmlElement): [StemDirectionType, string, string] {
+  private getStemDirectionAndColors(xmlNode: IXmlElement): [StemDirectionType, string, string, number] {
     let stemDirectionXml: StemDirectionType = StemDirectionType.Undefined;
     let stemColorXml: string;
+    let stemDefaultYXml: number;
     const stemNode: IXmlElement = xmlNode.element("stem");
     if (stemNode) {
       stemDirectionXml = this.getStemDirectionType(stemNode);
+
+      const stemDefaultYAttr: Attr = stemNode.attribute("default-y");
+      if (stemDefaultYAttr) {
+        const parsedStemDefaultY: number = Number.parseFloat(stemDefaultYAttr.value);
+        if (Number.isFinite(parsedStemDefaultY)) {
+          stemDefaultYXml = parsedStemDefaultY;
+        }
+      }
 
       const stemColorAttr: Attr = stemNode.attribute("color");
       if (stemColorAttr) { // can be null, maybe also undefined
@@ -618,7 +630,7 @@ export class InstrumentReader {
     if (noteColorXml && !stemColorXml) {
       stemColorXml = noteColorXml;
     }
-    return [stemDirectionXml, stemColorXml, noteheadColorXml];
+    return [stemDirectionXml, stemColorXml, noteheadColorXml, stemDefaultYXml];
   }
 
   /** Parse a color in XML format. Can be #ARGB or #RGB format, colors as byte hex values.

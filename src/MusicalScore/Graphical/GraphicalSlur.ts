@@ -347,6 +347,43 @@ export class GraphicalSlur extends GraphicalCurve {
         return {notehead, stem, articulations, beamPolygons, accidentals, tuplets};
     }
 
+    /** Find the finalized beam's outer edge exactly above or below the endpoint stem. */
+    private localBeamSideAnchor(geometry: RenderedSlurEndpointGeometry): PointF2D {
+        if (!geometry?.stem || geometry.beamPolygons.length === 0) {
+            return undefined;
+        }
+        const x: number = (geometry.stem.left + geometry.stem.right) / 2;
+        const intersections: number[] = [];
+        const tolerance: number = 0.08;
+        for (const polygon of geometry.beamPolygons) {
+            for (let index: number = 0; index < polygon.length; index++) {
+                const start: PointF2D = polygon[index];
+                const end: PointF2D = polygon[(index + 1) % polygon.length];
+                if (x < Math.min(start.x, end.x) - tolerance || x > Math.max(start.x, end.x) + tolerance) {
+                    continue;
+                }
+                const deltaX: number = end.x - start.x;
+                if (Math.abs(deltaX) < 0.001) {
+                    if (Math.abs(x - start.x) <= tolerance) {
+                        intersections.push(start.y, end.y);
+                    }
+                    continue;
+                }
+                const ratio: number = Math.max(0, Math.min(1, (x - start.x) / deltaX));
+                intersections.push(start.y + (end.y - start.y) * ratio);
+            }
+        }
+        if (intersections.length === 0) {
+            return undefined;
+        }
+        return new PointF2D(
+            x,
+            this.placement === PlacementEnum.Above
+                ? Math.min(...intersections)
+                : Math.max(...intersections),
+        );
+    }
+
     /**
      * A slur attached to a chord uses the outer notehead on its placement
      * side. MusicXML commonly associates both the upper and lower slur with
@@ -695,6 +732,10 @@ export class GraphicalSlur extends GraphicalCurve {
         endX: number,
         endY: number,
     ): SlurLayoutContext {
+        const sharedEndpointBeam: boolean = Boolean(
+            startNote?.sourceNote?.NoteBeam
+            && startNote.sourceNote.NoteBeam === endNote?.sourceNote?.NoteBeam,
+        );
         const endpoint: (
             side: "start" | "end",
             note: GraphicalNote,
@@ -707,16 +748,17 @@ export class GraphicalSlur extends GraphicalCurve {
                 ? this.renderedOuterChordGeometry(note, staffLine)
                 : undefined;
             const vexflowNote: VexFlowGraphicalNote = note as VexFlowGraphicalNote;
+            const stemSide: boolean = Boolean(note) &&
+                ((note.parentVoiceEntry.parentVoiceEntry.StemDirection === StemDirectionType.Up
+                    && this.placement === PlacementEnum.Above)
+                || (note.parentVoiceEntry.parentVoiceEntry.StemDirection === StemDirectionType.Down
+                    && this.placement === PlacementEnum.Below));
             return {
                 side,
                 present: Boolean(note),
                 sourceNoteId: vexflowNote?.getSVGId?.(),
                 stemDirection: note?.parentVoiceEntry?.parentVoiceEntry?.StemDirection,
-                stemSide: Boolean(note) &&
-                    ((note.parentVoiceEntry.parentVoiceEntry.StemDirection === StemDirectionType.Up
-                        && this.placement === PlacementEnum.Above)
-                    || (note.parentVoiceEntry.parentVoiceEntry.StemDirection === StemDirectionType.Down
-                        && this.placement === PlacementEnum.Below)),
+                stemSide,
                 notehead,
                 stem: rendered?.stem,
                 beams: (rendered?.beamPolygons ?? []).map((polygon): SlurBounds => ({
@@ -725,6 +767,7 @@ export class GraphicalSlur extends GraphicalCurve {
                     top: Math.min(...polygon.map((point): number => point.y)),
                     bottom: Math.max(...polygon.map((point): number => point.y)),
                 })),
+                beamSideAnchor: stemSide ? this.localBeamSideAnchor(rendered) : undefined,
                 accidentals: (rendered?.accidentals ?? []).map(
                     (bounds): SlurBounds => ({...bounds}),
                 ),
@@ -789,6 +832,7 @@ export class GraphicalSlur extends GraphicalCurve {
             isCrossStaff: this.slur.isCrossed(),
             isCrossSystem: this.diagnostics.segmentCount > 1,
             isNested: this.slur.startNoteHasMoreStartingSlurs() || this.slur.endNoteHasMoreEndingSlurs(),
+            sharedEndpointBeam,
             linkedGroupId: this.diagnostics.linkedGroupId,
         };
     }
@@ -1377,6 +1421,10 @@ export class GraphicalSlur extends GraphicalCurve {
         startStaffLine: StaffLine,
         endStaffLine: StaffLine,
     ): SlurLayoutContext {
+        const sharedEndpointBeam: boolean = Boolean(
+            startNote?.sourceNote?.NoteBeam
+            && startNote.sourceNote.NoteBeam === endNote?.sourceNote?.NoteBeam,
+        );
         const startGeometry: RenderedSlurEndpointGeometry =
             this.renderedEndpointGeometry(startNote, startStaffLine);
         const rawEndGeometry: RenderedSlurEndpointGeometry =
@@ -1389,26 +1437,30 @@ export class GraphicalSlur extends GraphicalCurve {
         ) => GraphicalSlurBoundsDiagnostics = (bounds, offset): GraphicalSlurBoundsDiagnostics => bounds
             ? {left: bounds.left, right: bounds.right, top: bounds.top + offset, bottom: bounds.bottom + offset}
             : undefined;
-        const endGeometry: RenderedSlurEndpointGeometry = rawEndGeometry
+        const translateGeometry: (
+            geometry: RenderedSlurEndpointGeometry,
+            offset: number,
+        ) => RenderedSlurEndpointGeometry = (geometry, offset): RenderedSlurEndpointGeometry => geometry
             ? {
-                notehead: translateBounds(rawEndGeometry.notehead, yOffset),
-                stem: translateBounds(rawEndGeometry.stem, yOffset),
-                articulations: rawEndGeometry.articulations.map((articulation) => ({
+                notehead: translateBounds(geometry.notehead, offset),
+                stem: translateBounds(geometry.stem, offset),
+                articulations: geometry.articulations.map((articulation) => ({
                     ...articulation,
-                    baseline: new PointF2D(articulation.baseline.x, articulation.baseline.y + yOffset),
-                    bounds: translateBounds(articulation.bounds, yOffset),
+                    baseline: new PointF2D(articulation.baseline.x, articulation.baseline.y + offset),
+                    bounds: translateBounds(articulation.bounds, offset),
                 })),
-                beamPolygons: rawEndGeometry.beamPolygons.map((polygon): PointF2D[] =>
-                    polygon.map((point): PointF2D => new PointF2D(point.x, point.y + yOffset)),
+                beamPolygons: geometry.beamPolygons.map((polygon): PointF2D[] =>
+                    polygon.map((point): PointF2D => new PointF2D(point.x, point.y + offset)),
                 ),
-                accidentals: rawEndGeometry.accidentals.map(
-                    (bounds): GraphicalSlurBoundsDiagnostics => translateBounds(bounds, yOffset),
+                accidentals: geometry.accidentals.map(
+                    (bounds): GraphicalSlurBoundsDiagnostics => translateBounds(bounds, offset),
                 ),
-                tuplets: rawEndGeometry.tuplets.map(
-                    (bounds): GraphicalSlurBoundsDiagnostics => translateBounds(bounds, yOffset),
+                tuplets: geometry.tuplets.map(
+                    (bounds): GraphicalSlurBoundsDiagnostics => translateBounds(bounds, offset),
                 ),
             }
             : undefined;
+        const endGeometry: RenderedSlurEndpointGeometry = translateGeometry(rawEndGeometry, yOffset);
         const makeEndpoint: (
             side: "start" | "end",
             note: GraphicalNote,
@@ -1419,9 +1471,11 @@ export class GraphicalSlur extends GraphicalCurve {
             present: true,
             sourceNoteId: (note as VexFlowGraphicalNote)?.getSVGId?.(),
             stemDirection: note?.parentVoiceEntry?.parentVoiceEntry?.StemDirection,
-            // Cross-staff phrase slurs use the notehead crown on both staves;
-            // the local stem direction must not pull one endpoint away from it.
-            stemSide: false,
+            stemSide: Boolean(note) &&
+                ((note.parentVoiceEntry.parentVoiceEntry.StemDirection === StemDirectionType.Up
+                    && this.placement === PlacementEnum.Above)
+                || (note.parentVoiceEntry.parentVoiceEntry.StemDirection === StemDirectionType.Down
+                    && this.placement === PlacementEnum.Below)),
             notehead: geometry?.notehead,
             stem: geometry?.stem,
             beams: (geometry?.beamPolygons ?? []).map((polygon): SlurBounds => ({
@@ -1430,6 +1484,9 @@ export class GraphicalSlur extends GraphicalCurve {
                 top: Math.min(...polygon.map((candidate): number => candidate.y)),
                 bottom: Math.max(...polygon.map((candidate): number => candidate.y)),
             })),
+            beamSideAnchor: note?.parentVoiceEntry?.parentVoiceEntry?.StemDirection === StemDirectionType.Up
+                ? this.localBeamSideAnchor(geometry)
+                : undefined,
             accidentals: (geometry?.accidentals ?? []).map((bounds): SlurBounds => ({...bounds})),
             articulations: (geometry?.articulations ?? []).map((articulation, index) => {
                 const id: string = `${side}-articulation-${index}`;
@@ -1464,30 +1521,96 @@ export class GraphicalSlur extends GraphicalCurve {
         for (let index: number = 0; index < sampleLength; index++) {
             baseline[index] = lineValueAtX(this.bezierStartPt, this.bezierEndPt, index / samplingUnit);
         }
+        const startEndpoint: SlurEndpointContext =
+            makeEndpoint("start", startNote, startGeometry, this.bezierStartPt);
+        const endEndpoint: SlurEndpointContext =
+            makeEndpoint("end", endNote, endGeometry, this.bezierEndPt);
         const obstacles: SlurObstacle[] = [];
-        if (startGeometry?.notehead) {
-            obstacles.push({
-                id: "cross-staff-start-head",
-                type: "notehead",
-                bounds: {...startGeometry.notehead},
-                endpoint: "start",
+        const seenObstacles: Map<string, SlurObstacle> = new Map<string, SlurObstacle>();
+        const minimumX: number = Math.min(this.bezierStartPt.x, this.bezierEndPt.x) - 1;
+        const maximumX: number = Math.max(this.bezierStartPt.x, this.bezierEndPt.x) + 1;
+        const addObstacle: (
+            type: SlurObstacle["type"],
+            bounds: GraphicalSlurBoundsDiagnostics,
+            id: string,
+            endpoint?: SlurObstacle["endpoint"],
+            polygon?: PointF2D[],
+            sourceNoteId?: string,
+        ) => void = (type, bounds, id, endpoint, polygon, sourceNoteId): void => {
+            if (!bounds || bounds.right < minimumX || bounds.left > maximumX) {
+                return;
+            }
+            const key: string = `${type}:${bounds.left.toFixed(3)}:${bounds.top.toFixed(3)}:`
+                + `${bounds.right.toFixed(3)}:${bounds.bottom.toFixed(3)}`;
+            const existing: SlurObstacle = seenObstacles.get(key);
+            if (existing) {
+                if (endpoint && existing.endpoint && endpoint !== existing.endpoint) {
+                    existing.endpoint = "both";
+                } else if (endpoint && !existing.endpoint) {
+                    existing.endpoint = endpoint;
+                }
+                return;
+            }
+            const obstacle: SlurObstacle = {
+                id,
+                type,
+                bounds,
+                endpoint,
+                polygon,
+                sourceNoteId,
                 clearance: this.rules.SlurObstacleClearance,
-            });
-        }
-        if (endGeometry?.notehead) {
-            obstacles.push({
-                id: "cross-staff-end-head",
-                type: "notehead",
-                bounds: {...endGeometry.notehead},
-                endpoint: "end",
-                clearance: this.rules.SlurObstacleClearance,
-            });
+            };
+            seenObstacles.set(key, obstacle);
+            obstacles.push(obstacle);
+        };
+        const staffLines: StaffLine[] = startStaffLine === endStaffLine
+            ? [startStaffLine]
+            : [startStaffLine, endStaffLine];
+        let obstacleIndex: number = 0;
+        for (const staffLine of staffLines) {
+            const offset: number = staffLine.PositionAndShape.RelativePosition.y
+                - startStaffLine.PositionAndShape.RelativePosition.y;
+            for (const measure of staffLine.Measures) {
+                for (const staffEntry of measure.staffEntries) {
+                    for (const voiceEntry of staffEntry.graphicalVoiceEntries) {
+                        for (const note of voiceEntry.notes) {
+                            const geometry: RenderedSlurEndpointGeometry = translateGeometry(
+                                this.renderedEndpointGeometry(note, staffLine),
+                                offset,
+                            );
+                            if (!geometry) {
+                                continue;
+                            }
+                            const endpoint: SlurObstacle["endpoint"] = voiceEntry === startNote.parentVoiceEntry
+                                ? "start"
+                                : voiceEntry === endNote.parentVoiceEntry ? "end" : undefined;
+                            const sourceNoteId: string = (note as VexFlowGraphicalNote)?.getSVGId?.();
+                            const prefix: string = `cross-staff-note-${obstacleIndex++}`;
+                            addObstacle("notehead", geometry.notehead, `${prefix}-head`, endpoint, undefined, sourceNoteId);
+                            addObstacle("stem", geometry.stem, `${prefix}-stem`, endpoint, undefined, sourceNoteId);
+                            geometry.accidentals.forEach((bounds, index): void =>
+                                addObstacle("accidental", bounds, `${prefix}-accidental-${index}`, endpoint),
+                            );
+                            geometry.beamPolygons.forEach((polygon, index): void => {
+                                const xs: number[] = polygon.map((point): number => point.x);
+                                const ys: number[] = polygon.map((point): number => point.y);
+                                addObstacle("beam", {
+                                    left: Math.min(...xs),
+                                    right: Math.max(...xs),
+                                    top: Math.min(...ys),
+                                    bottom: Math.max(...ys),
+                                }, `${prefix}-beam-${index}`, endpoint, polygon);
+                            });
+                        }
+                    }
+                }
+            }
         }
         return {
             id: `slur-cross-staff-m${this.staffEntries[0]?.parentMeasure?.MeasureNumber ?? "unknown"}`,
             direction: PlacementEnum.Above,
-            start: makeEndpoint("start", startNote, startGeometry, this.bezierStartPt),
-            end: makeEndpoint("end", endNote, endGeometry, this.bezierEndPt),
+            start: startEndpoint,
+            end: endEndpoint,
             obstacles,
             envelope: {
                 samplingUnit,
@@ -1502,6 +1625,7 @@ export class GraphicalSlur extends GraphicalCurve {
             isCrossStaff: true,
             isCrossSystem: false,
             isNested: false,
+            sharedEndpointBeam,
         };
     }
 

@@ -64,6 +64,8 @@ export interface SlurEndpointContext {
     notehead?: SlurBounds;
     stem?: SlurBounds;
     beams: readonly SlurBounds[];
+    /** Exact outer edge of the finalized beam at the endpoint stem's x coordinate. */
+    beamSideAnchor?: PointF2D;
     accidentals: readonly SlurBounds[];
     articulations: SlurArticulationContext[];
     /** Geometry-derived starting point retained as one scored candidate. */
@@ -118,6 +120,8 @@ export interface SlurLayoutContext {
     isCrossStaff: boolean;
     isCrossSystem: boolean;
     isNested: boolean;
+    /** Both rendered endpoints belong to the same source beam. */
+    sharedEndpointBeam?: boolean;
     linkedGroupId?: string;
 }
 

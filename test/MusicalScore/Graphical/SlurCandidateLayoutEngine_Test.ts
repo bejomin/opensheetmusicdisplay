@@ -720,6 +720,44 @@ describe("candidate slur layout engine", (): void => {
     ).to.equal(true);
   });
 
+  it("uses exact local beam edges and prefers them for a shared beamed phrase", (): void => {
+    const beamedStart: SlurEndpointContext = {
+      ...endpoint("start", 2),
+      stem: { left: 1.95, right: 2.05, top: -1.4, bottom: 3 },
+      stemSide: true,
+      beams: [{ left: 1.8, right: 18.2, top: -1.4, bottom: 0 }],
+      beamSideAnchor: new PointF2D(2, -1.1),
+    };
+    const beamedEnd: SlurEndpointContext = {
+      ...endpoint("end", 18),
+      stem: { left: 17.95, right: 18.05, top: -2.2, bottom: 3 },
+      stemSide: true,
+      beams: [{ left: 1.8, right: 18.2, top: -2.4, bottom: -0.8 }],
+      beamSideAnchor: new PointF2D(18, -2.05),
+    };
+    const layoutContext: SlurLayoutContext = context({
+      start: beamedStart,
+      end: beamedEnd,
+      sharedEndpointBeam: true,
+    });
+    const anchors: {start: SlurAnchorCandidate[], end: SlurAnchorCandidate[]} =
+      generateSlurAnchors(layoutContext, seed, options.obstacleClearance);
+    const startBeam: SlurAnchorCandidate = anchors.start.find((anchor) => anchor.type === "beam-side");
+    const endBeam: SlurAnchorCandidate = anchors.end.find((anchor) => anchor.type === "beam-side");
+
+    expect(startBeam.x).to.equal(2);
+    expect(startBeam.y).to.be.closeTo(-1.45, 1e-9);
+    expect(endBeam.x).to.equal(18);
+    expect(endBeam.y).to.be.closeTo(-2.4, 1e-9);
+
+    const result: SlurLayoutResult = calculateCandidateSlurLayout(layoutContext, seed, options);
+    const selected: SlurCurveCandidate = result.candidates.find(
+      (candidate) => candidate.id === result.selectedCandidateId,
+    );
+    expect(selected.startAnchor.type).to.equal("beam-side");
+    expect(selected.endAnchor.type).to.equal("beam-side");
+  });
+
   it("does not exempt a spanning endpoint beam outside the attachment zone", (): void => {
     const spanningBeam: SlurObstacle = {
       id: "endpoint-spanning-beam",
