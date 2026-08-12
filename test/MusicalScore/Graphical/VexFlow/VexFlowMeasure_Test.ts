@@ -26,6 +26,8 @@ import { TabNote } from "../../../../src/MusicalScore/VoiceData/TabNote";
 import { PointF2D } from "../../../../src/Common/DataObjects/PointF2D";
 import { GraphicalTie } from "../../../../src/MusicalScore/Graphical/GraphicalTie";
 import { AccidentalEnum } from "../../../../src/Common/DataObjects/Pitch";
+import { PlacementEnum } from "../../../../src/MusicalScore/VoiceData/Expressions/AbstractExpression";
+import * as VF from "../../../../src/MusicalScore/Graphical/VexFlow/VexFlowAdapter";
 
 describe("VexFlow Measure", () => {
 
@@ -584,6 +586,42 @@ describe("VexFlow Measure", () => {
          expect(measureNumberLabels(osmdRuleOn), "rule enabled: implicit measure number is rendered").to.include("0");
          done();
       }).catch(done);
+   });
+
+   it("places automatic chord fingerings left while preserving explicit below placement", async (): Promise<void> => {
+      const score: Document = TestUtils.getScore("test_fingering_Simple_Chords_Treble_Bass.musicxml");
+      const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+      osmd.EngravingRules.FingeringPosition = PlacementEnum.NotYetDefined;
+
+      await osmd.load(score);
+      osmd.render();
+
+      const trebleMeasure: GraphicalMeasure = osmd.GraphicSheet.findGraphicalMeasure(0, 0);
+      const bassMeasure: GraphicalMeasure = osmd.GraphicSheet.findGraphicalMeasure(0, 1);
+      const trebleEntry: GraphicalStaffEntry = trebleMeasure.staffEntries[0];
+      const bassEntry: GraphicalStaffEntry = bassMeasure.staffEntries[0];
+      const trebleVexNote: VF.StaveNote =
+         (trebleEntry.graphicalVoiceEntries[0] as VexFlowVoiceEntry).vfStaveNote as VF.StaveNote;
+      const leftFingerings: VF.FretHandFinger[] = trebleVexNote.getModifiers()
+         .filter((modifier: VF.Modifier): modifier is VF.FretHandFinger => modifier instanceof VF.FretHandFinger);
+
+      expect(trebleEntry.FingeringEntries, "automatic chord fingerings use VexFlow modifiers").to.be.empty;
+      expect(leftFingerings, "one left fingering per chord note").to.have.length(3);
+      expect(leftFingerings.every(
+         (fingering: VF.FretHandFinger): boolean => fingering.getPosition() === VF.Modifier.Position.LEFT,
+      )).to.equal(true);
+      expect(trebleVexNote.getMetrics().modLeftPx, "left fingerings reserve horizontal space").to.be.greaterThan(0);
+      expect(
+         bassEntry.FingeringEntries.map((entry: GraphicalLabel): string => entry.Label.text).sort(),
+         "explicit below fingerings stay in OSMD's skyline-aware label path",
+      ).to.deep.equal(["1", "2", "4"]);
+
+      const firstLeftExtent: number = trebleVexNote.getMetrics().modLeftPx;
+      osmd.render();
+      const rerenderedTreble: GraphicalMeasure = osmd.GraphicSheet.findGraphicalMeasure(0, 0);
+      const rerenderedNote: VF.StaveNote =
+         (rerenderedTreble.staffEntries[0].graphicalVoiceEntries[0] as VexFlowVoiceEntry).vfStaveNote as VF.StaveNote;
+      expect(rerenderedNote.getMetrics().modLeftPx).to.be.closeTo(firstLeftExtent, 0.001);
    });
 
    // Non-regression test for the stacking order of fingerings collected from multiple voices.

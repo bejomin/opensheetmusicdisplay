@@ -75,6 +75,7 @@ import { LyricExtendType, LyricsEntry } from "../VoiceData/Lyrics/LyricsEntry";
 import { Voice } from "../VoiceData/Voice";
 import { TabNote } from "../VoiceData/TabNote";
 import { IHorizontalSystemSpacingPlanner } from "./HorizontalSystemSpacing";
+import { resolveFingeringPlacement } from "./FingeringPlacement";
 
 /**
  * Class used to do all the calculations in a MusicSheet, which in the end populates a GraphicalMusicSheet.
@@ -3415,32 +3416,24 @@ export abstract class MusicSheetCalculator {
         }
     }
 
-    private getFingeringPlacement(measure: GraphicalMeasure): PlacementEnum {
-        let placement: PlacementEnum = this.rules.FingeringPosition;
-        if (placement === PlacementEnum.NotYetDefined || placement === PlacementEnum.AboveOrBelow) {
-            placement = measure.isUpperStaffOfInstrument() ? PlacementEnum.Above : PlacementEnum.Below;
-        }
-        return placement;
+    private getFingeringStaffSidePlacement(measure: GraphicalMeasure): PlacementEnum {
+        return measure.isUpperStaffOfInstrument() ? PlacementEnum.Above : PlacementEnum.Below;
     }
 
     public calculateFingerings(): void {
-        if (this.rules.FingeringPosition === PlacementEnum.Left ||
-            this.rules.FingeringPosition === PlacementEnum.Right) {
-                return;
-        }
         for (const system of this.musicSystems) {
             for (const line of system.StaffLines) {
                 for (const measure of line.Measures) {
                     if (measure.isTabMeasure && !this.rules.TabFingeringsRendered) {
                         continue; // don't duplicate fingerings into tab measures. tab notes are already
                     }
-                    const placement: PlacementEnum = this.getFingeringPlacement(measure);
+                    const staffSidePlacement: PlacementEnum = this.getFingeringStaffSidePlacement(measure);
                     for (const gse of measure.staffEntries) {
                         gse.FingeringEntries = [];
-                        const skybottomcalculator: SkyBottomLineCalculator = line.SkyBottomLineCalculator;
-                        const staffEntryPositionX: number = gse.PositionAndShape.RelativePosition.x +
-                            measure.PositionAndShape.RelativePosition.x;
-                        const fingerings: TechnicalInstruction[] = [];
+                        const fingeringsByPlacement: Map<PlacementEnum, TechnicalInstruction[]> = new Map([
+                            [PlacementEnum.Above, []],
+                            [PlacementEnum.Below, []],
+                        ]);
                         for (const voiceEntry of gse.graphicalVoiceEntries) {
                             if (voiceEntry.parentVoiceEntry.IsGrace) {
                                 continue;
@@ -3448,98 +3441,108 @@ export abstract class MusicSheetCalculator {
                             // Sibelius: can have multiple fingerings per note, so we need to check voice entry instructions, not note.Fingering
                             for (const instruction of voiceEntry.parentVoiceEntry.TechnicalInstructions) {
                                 if (instruction.type === TechnicalInstructionType.Fingering) {
-                                    fingerings.push(instruction);
-                                }
-                            }
-                            // for (const note of voiceEntry.notes) {
-                            //     const sourceNote: Note = note.sourceNote;
-                            //     if (sourceNote.Fingering && !sourceNote.IsGraceNote) {
-                            //         fingerings.push(sourceNote.Fingering);
-                            //     }
-                            // }
-                        }
-                        if (fingerings.length > 1) {
-                            // const isBulkFingering: boolean = fingerings.last().sourceNote === fingerings[0].sourceNote;
-                            //   // bulk fingering = more than one fingering per note given in MusicXML. (some programs export like this sometimes)
-                            // console.log("isBulkFingering: " + isBulkFingering);
-                            const distinctPitchedNotes: boolean = fingerings.every(
-                                (fingering: TechnicalInstruction, index: number) => fingering.sourceNote?.Pitch !== undefined &&
-                                    fingerings.findIndex((other: TechnicalInstruction) => other.sourceNote === fingering.sourceNote) === index);
-                            if (distinctPitchedNotes) {
-                                // stack fingerings in the pitch order of their notes, mirroring the chord (lowest note's fingering at the bottom).
-                                //   sorting handles notes collected from multiple voices, which are not necessarily in pitch order.
-                                fingerings.sort((a: TechnicalInstruction, b: TechnicalInstruction) =>
-                                    a.sourceNote.Pitch.getHalfTone() - b.sourceNote.Pitch.getHalfTone());
-                                if (placement === PlacementEnum.Below) {
-                                    fingerings.reverse();
-                                }
-                            } else {
-                                // fallback for bulk fingerings (multiple per note) or unpitched notes: keep XML order, with heuristics
-                                if (placement === PlacementEnum.Below) {
-                                    fingerings.reverse();
-                                }
-                                let topNote: Note;
-                                for (const gve of gse.graphicalVoiceEntries) {
-                                    for (const note of gve.notes) {
-                                        if (!topNote || note.sourceNote.Pitch?.getHalfTone() > topNote.Pitch?.getHalfTone()) {
-                                            topNote = note.sourceNote;
-                                        }
-                                    }
-                                }
-                                if (fingerings[0].sourceNote === topNote && placement === PlacementEnum.Above) {
-                                    // || fingerings[0].sourceNote === topNote && placement === PlacementEnum.Below && isBulkFingering // doesn't seem necessary
-                                    fingerings.reverse();
+                                    const placement: PlacementEnum = resolveFingeringPlacement(
+                                        instruction.placement,
+                                        this.rules.FingeringPosition,
+                                        staffSidePlacement,
+                                        voiceEntry.notes.length > 1 || gse.graphicalVoiceEntries.length > 1,
+                                    );
+                                    fingeringsByPlacement.get(placement)?.push(instruction);
                                 }
                             }
                         }
-                        for (let i: number = 0; i < fingerings.length; i++) {
-                            const fingering: TechnicalInstruction = fingerings[i];
-                            const alignment: TextAlignmentEnum =
-                                placement === PlacementEnum.Above ? TextAlignmentEnum.CenterBottom : TextAlignmentEnum.CenterTop;
-                            const label: Label = new Label(fingering.value, alignment);
-                            const gLabel: GraphicalLabel = new GraphicalLabel(
-                                label, this.rules.FingeringTextSize, label.textAlignment, this.rules, line.PositionAndShape);
-                            if (fingering.fontFamily) {
-                                label.fontFamily = fingering.fontFamily;
-                            }
-                            const marginLeft: number = staffEntryPositionX + gLabel.PositionAndShape.BorderMarginLeft;
-                            const marginRight: number = staffEntryPositionX + gLabel.PositionAndShape.BorderMarginRight;
-                            let skybottomFurthest: number = undefined;
-                            if (placement === PlacementEnum.Above) {
-                                skybottomFurthest = skybottomcalculator.getSkyLineMinInRange(marginLeft, marginRight);
-                            } else {
-                                skybottomFurthest = skybottomcalculator.getBottomLineMaxInRange(marginLeft, marginRight);
-                            }
-                            let yShift: number = 0;
-                            if (i === 0) {
-                                yShift += this.rules.FingeringOffsetY;
-                                if (placement === PlacementEnum.Above) {
-                                    yShift += 0.1; // above fingerings are a bit closer to the notes than below ones for some reason
-                                }
-                            } else {
-                                yShift += this.rules.FingeringPaddingY;
-                            }
-                            if (placement === PlacementEnum.Above) {
-                                yShift *= -1;
-                            }
-                            gLabel.PositionAndShape.RelativePosition.y += skybottomFurthest + yShift;
-                            gLabel.PositionAndShape.RelativePosition.x = staffEntryPositionX;
-                            gLabel.setLabelPositionAndShapeBorders();
-                            gLabel.PositionAndShape.calculateBoundingBox();
-                            gse.FingeringEntries.push(gLabel);
-                            const start: number = gLabel.PositionAndShape.RelativePosition.x + gLabel.PositionAndShape.BorderLeft;
-                            //start -= line.PositionAndShape.RelativePosition.x;
-                            const end: number = start - gLabel.PositionAndShape.BorderLeft + gLabel.PositionAndShape.BorderRight;
-                            if (placement === PlacementEnum.Above) {
-                                skybottomcalculator.updateSkyLineInRange(
-                                    start, end, gLabel.PositionAndShape.RelativePosition.y + gLabel.PositionAndShape.BorderTop); // BorderMarginTop too much
-                            } else if (placement === PlacementEnum.Below) {
-                                skybottomcalculator.updateBottomLineInRange(
-                                    start, end, gLabel.PositionAndShape.RelativePosition.y + gLabel.PositionAndShape.BorderBottom);
-                            }
+                        for (const placement of [PlacementEnum.Above, PlacementEnum.Below]) {
+                            this.layoutFingeringsAtStaffEntry(
+                                line,
+                                measure,
+                                gse,
+                                placement,
+                                fingeringsByPlacement.get(placement),
+                            );
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private layoutFingeringsAtStaffEntry(
+        line: StaffLine,
+        measure: GraphicalMeasure,
+        gse: GraphicalStaffEntry,
+        placement: PlacementEnum,
+        fingerings: TechnicalInstruction[],
+    ): void {
+        if (!fingerings?.length) {
+            return;
+        }
+        const skybottomcalculator: SkyBottomLineCalculator = line.SkyBottomLineCalculator;
+        const staffEntryPositionX: number = gse.PositionAndShape.RelativePosition.x +
+            measure.PositionAndShape.RelativePosition.x;
+        if (fingerings.length > 1) {
+            const distinctPitchedNotes: boolean = fingerings.every(
+                (fingering: TechnicalInstruction, index: number) => fingering.sourceNote?.Pitch !== undefined &&
+                    fingerings.findIndex((other: TechnicalInstruction) => other.sourceNote === fingering.sourceNote) === index);
+            if (distinctPitchedNotes) {
+                // Stack fingerings in pitch order so the labels mirror the chord.
+                fingerings.sort((a: TechnicalInstruction, b: TechnicalInstruction) =>
+                    a.sourceNote.Pitch.getHalfTone() - b.sourceNote.Pitch.getHalfTone());
+                if (placement === PlacementEnum.Below) {
+                    fingerings.reverse();
+                }
+            } else {
+                // Bulk fingerings (multiple instructions on one note) retain XML order.
+                if (placement === PlacementEnum.Below) {
+                    fingerings.reverse();
+                }
+                let topNote: Note;
+                for (const gve of gse.graphicalVoiceEntries) {
+                    for (const note of gve.notes) {
+                        if (!topNote || note.sourceNote.Pitch?.getHalfTone() > topNote.Pitch?.getHalfTone()) {
+                            topNote = note.sourceNote;
+                        }
+                    }
+                }
+                if (fingerings[0].sourceNote === topNote && placement === PlacementEnum.Above) {
+                    fingerings.reverse();
+                }
+            }
+        }
+        for (let i: number = 0; i < fingerings.length; i++) {
+            const fingering: TechnicalInstruction = fingerings[i];
+            const alignment: TextAlignmentEnum =
+                placement === PlacementEnum.Above ? TextAlignmentEnum.CenterBottom : TextAlignmentEnum.CenterTop;
+            const label: Label = new Label(fingering.value, alignment);
+            const gLabel: GraphicalLabel = new GraphicalLabel(
+                label, this.rules.FingeringTextSize, label.textAlignment, this.rules, line.PositionAndShape);
+            if (fingering.fontFamily) {
+                label.fontFamily = fingering.fontFamily;
+            }
+            const marginLeft: number = staffEntryPositionX + gLabel.PositionAndShape.BorderMarginLeft;
+            const marginRight: number = staffEntryPositionX + gLabel.PositionAndShape.BorderMarginRight;
+            const skybottomFurthest: number = placement === PlacementEnum.Above
+                ? skybottomcalculator.getSkyLineMinInRange(marginLeft, marginRight)
+                : skybottomcalculator.getBottomLineMaxInRange(marginLeft, marginRight);
+            let yShift: number = i === 0 ? this.rules.FingeringOffsetY : this.rules.FingeringPaddingY;
+            if (i === 0 && placement === PlacementEnum.Above) {
+                yShift += 0.1; // above fingerings are a bit closer to the notes than below ones for some reason
+            }
+            if (placement === PlacementEnum.Above) {
+                yShift *= -1;
+            }
+            gLabel.PositionAndShape.RelativePosition.y += skybottomFurthest + yShift;
+            gLabel.PositionAndShape.RelativePosition.x = staffEntryPositionX;
+            gLabel.setLabelPositionAndShapeBorders();
+            gLabel.PositionAndShape.calculateBoundingBox();
+            gse.FingeringEntries.push(gLabel);
+            const start: number = gLabel.PositionAndShape.RelativePosition.x + gLabel.PositionAndShape.BorderLeft;
+            const end: number = start - gLabel.PositionAndShape.BorderLeft + gLabel.PositionAndShape.BorderRight;
+            if (placement === PlacementEnum.Above) {
+                skybottomcalculator.updateSkyLineInRange(
+                    start, end, gLabel.PositionAndShape.RelativePosition.y + gLabel.PositionAndShape.BorderTop);
+            } else {
+                skybottomcalculator.updateBottomLineInRange(
+                    start, end, gLabel.PositionAndShape.RelativePosition.y + gLabel.PositionAndShape.BorderBottom);
             }
         }
     }

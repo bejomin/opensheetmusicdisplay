@@ -38,6 +38,7 @@ import { GraphicalTie } from "../GraphicalTie";
 import { Note } from "../../VoiceData/Note";
 import { TabNote } from "../../VoiceData/TabNote";
 import { getDefaultTextFontFamily } from "../ScoreTextFontRouting";
+import { resolveFingeringPlacement } from "../FingeringPlacement";
 
 const DOUBLE_HEAVY_BARLINE_TYPE: number = 8;
 
@@ -1905,10 +1906,11 @@ export class VexFlowMeasure extends GraphicalMeasure {
 
                 // add fingering
                 if (voiceEntry.parentVoiceEntry && this.rules.RenderFingerings) {
-                    if (this.rules.FingeringPosition === PlacementEnum.Left ||
-                        this.rules.FingeringPosition === PlacementEnum.Right) {
-                            this.createFingerings(voiceEntry);
-                    } // else created in MusicSheetCalculator.calculateFingerings() as Labels
+                    // Left/right fingerings must enter VexFlow's modifier context before
+                    // formatting so their width participates in rhythmic spacing. The
+                    // method filters out normal above/below fingerings, which are created
+                    // later as labels with OSMD bounding boxes.
+                    this.createFingerings(voiceEntry);
                     this.createStringNumber(voiceEntry);
                 }
 
@@ -2019,8 +2021,10 @@ export class VexFlowMeasure extends GraphicalMeasure {
     }
 
     /** Creates vexflow fingering elements.
-     * Note that this is currently only used for Left and Right fingering positions, not Above and Below,
-     * in which case they are instead added via MusicSheetCalculator.calculateFingerings() as Labels with bounding boxes.
+     * Normal notes use these modifiers only for left/right placement; above/below
+     * fingerings are added by MusicSheetCalculator.calculateFingerings() as
+     * labels with bounding boxes. Grace notes continue to use VexFlow modifiers
+     * for every placement because the later label pass deliberately skips them.
      */
     protected createFingerings(voiceEntry: GraphicalVoiceEntry): void {
         const vexFlowVoiceEntry: VexFlowVoiceEntry = voiceEntry as VexFlowVoiceEntry;
@@ -2061,23 +2065,24 @@ export class VexFlowMeasure extends GraphicalMeasure {
                 continue;
             }
             fingeringIndex++; // 0 for first fingering
-            let fingeringPosition: PlacementEnum = this.rules.FingeringPosition;
-            //currently only relevant for grace notes, because we create other fingerings above/below in MusicSheetCalculator.createFingerings
-            if (this.rules.FingeringPositionGrace === PlacementEnum.AboveOrBelow) {
-                //if (this.rules.FingeringPosition === PlacementEnum.AboveOrBelow) {
-                if (this.isUpperStaffOfInstrument()) { // (e.g. piano right hand)
-                    fingeringPosition = PlacementEnum.Above;
-                } else if (this.isLowerStaffOfInstrument()) {
-                    fingeringPosition = PlacementEnum.Below;
-                }
-            }
-            if (fingering.placement !== PlacementEnum.NotYetDefined) {
-                fingeringPosition = fingering.placement;
+            const isGrace: boolean = voiceEntry.parentVoiceEntry.IsGrace;
+            const configuredPlacement: PlacementEnum = isGrace
+                ? this.rules.FingeringPositionGrace
+                : this.rules.FingeringPosition;
+            const fingeringPosition: PlacementEnum = resolveFingeringPlacement(
+                fingering.placement,
+                configuredPlacement,
+                this.isUpperStaffOfInstrument() ? PlacementEnum.Above : PlacementEnum.Below,
+                voiceEntry.notes.length > 1 || voiceEntry.parentStaffEntry.graphicalVoiceEntries.length > 1,
+            );
+            if (!isGrace &&
+                fingeringPosition !== PlacementEnum.Left &&
+                fingeringPosition !== PlacementEnum.Right) {
+                continue;
             }
             let offsetX: number = this.rules.FingeringOffsetX;
             let modifierPosition: number; // VF.Stavemodifier.Position
             switch (fingeringPosition) {
-                default:
                 case PlacementEnum.Left:
                     modifierPosition = VF.StaveModifier.Position.LEFT;
                     offsetX -= note.baseFingeringXOffset * unitInPixels;
@@ -2092,17 +2097,8 @@ export class VexFlowMeasure extends GraphicalMeasure {
                 case PlacementEnum.Below:
                     modifierPosition = VF.StaveModifier.Position.BELOW;
                     break;
-                case PlacementEnum.NotYetDefined: // automatic fingering placement, could be more complex/customizable
-                    const sourceStaff: Staff = voiceEntry.parentStaffEntry.sourceStaffEntry.ParentStaff;
-                    if (voiceEntry.notes.length > 1 || voiceEntry.parentStaffEntry.graphicalVoiceEntries.length > 1) {
-                        modifierPosition = VF.StaveModifier.Position.LEFT;
-                    } else if (sourceStaff.idInMusicSheet === 0) {
-                        modifierPosition = VF.StaveModifier.Position.ABOVE;
-                        fingeringPosition = PlacementEnum.Above;
-                    } else {
-                        modifierPosition = VF.StaveModifier.Position.BELOW;
-                        fingeringPosition = PlacementEnum.Below;
-                    }
+                default:
+                    continue;
             }
 
             const fretFinger: VF.FretHandFinger = new VF.FretHandFinger(fingering.value);
