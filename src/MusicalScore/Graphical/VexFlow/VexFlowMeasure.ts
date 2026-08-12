@@ -1933,16 +1933,24 @@ export class VexFlowMeasure extends GraphicalMeasure {
     private createArpeggio(voiceEntry: GraphicalVoiceEntry): void {
         if (voiceEntry.parentVoiceEntry && voiceEntry.parentVoiceEntry.Arpeggio) {
             const arpeggio: Arpeggio = voiceEntry.parentVoiceEntry.Arpeggio;
-            // TODO right now our arpeggio object has all arpeggio notes from arpeggios across all voices.
-            // see VoiceGenerator. Doesn't matter for Vexflow for now though
-            if (voiceEntry.notes && voiceEntry.notes.length > 1) {
+            if (voiceEntry.notes?.length > 0 && arpeggio.notes.length > 1) {
                         const type: number = VexFlowConverter.StrokeTypeFromArpeggioType(arpeggio.type);
                         const stroke: VF.Stroke = new VF.Stroke(type, {
                             allVoices: this.rules.ArpeggiosGoAcrossVoices
                             // default: false. This causes arpeggios to always go across all voices, which is often unwanted.
                             // also, this can cause infinite height of stroke, see #546
                         });
-                //if (arpeggio.notes.length === vexFlowVoiceEntry.notes.length) { // different workaround for endless y bug
+                const ownerStaffId: number = voiceEntry.parentVoiceEntry.ParentSourceStaffEntry.ParentStaff.idInMusicSheet;
+                const upperEndpoint: Note = arpeggio.notes
+                    .filter((note: Note) => note.PrintObject && note.ParentStaff.idInMusicSheet < ownerStaffId)
+                    .sort((a: Note, b: Note) => a.ParentStaff.idInMusicSheet - b.ParentStaff.idInMusicSheet)[0];
+                const endpointGraphicalNote: VexFlowGraphicalNote = upperEndpoint
+                    ? this.rules.GNote(upperEndpoint) as VexFlowGraphicalNote
+                    : undefined;
+                const endpointVexFlowNote: VF.StemmableNote = endpointGraphicalNote?.vfnote?.[0];
+                if (endpointVexFlowNote) {
+                    stroke.addEndNote(endpointVexFlowNote);
+                }
                 if (this.rules.RenderArpeggios) {
                     (voiceEntry as VexFlowVoiceEntry).vfStaveNote.addStroke(0, stroke);
                 }
