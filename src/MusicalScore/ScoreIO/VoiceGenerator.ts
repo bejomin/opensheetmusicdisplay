@@ -168,44 +168,22 @@ export class VoiceGenerator {
         // check for Arpeggios
         const arpeggioNode: IXmlElement = notationNode.element("arpeggiate");
         if (arpeggioNode !== undefined) {
-          let currentArpeggio: Arpeggio;
-          if (this.currentVoiceEntry.Arpeggio) { // add note to existing Arpeggio
-            currentArpeggio = this.currentVoiceEntry.Arpeggio;
-          } else { // create new Arpeggio
-            let arpeggioAlreadyExists: boolean = false;
-            for (const voiceEntry of this.currentStaffEntry.VoiceEntries) {
-              if (voiceEntry.Arpeggio) {
-                arpeggioAlreadyExists = true;
-                currentArpeggio = voiceEntry.Arpeggio;
-                // TODO handle multiple arpeggios across multiple voices at same timestamp
-
-                // this.currentVoiceEntry.Arpeggio = currentArpeggio; // register the arpeggio in the current voice entry as well?
-                //   but then we duplicate information, and may have to take care not to render it multiple times
-
-                // we already have an arpeggio in another voice, at the current timestamp. add the notes there.
-                break;
-              }
+          const numberAttribute: IXmlAttribute = arpeggioNode.attribute("number");
+          const parsedNumber: number = Number.parseInt(numberAttribute?.value ?? "1", 10);
+          const arpeggioNumber: number = Number.isFinite(parsedNumber) ? parsedNumber : 1;
+          const directionAttribute: IXmlAttribute = arpeggioNode.attribute("direction");
+          const arpeggioType: ArpeggioType = this.arpeggioTypeFromDirection(directionAttribute?.value);
+          let currentArpeggio: Arpeggio = this.findArpeggioAtCurrentTimestamp(arpeggioNumber);
+          if (!currentArpeggio) {
+            currentArpeggio = new Arpeggio(this.currentVoiceEntry, arpeggioType, arpeggioNumber);
+            this.currentVoiceEntry.Arpeggio = currentArpeggio;
+          } else {
+            if (directionAttribute) {
+              currentArpeggio.type = arpeggioType;
             }
-            if (!arpeggioAlreadyExists) {
-                let arpeggioType: ArpeggioType = ArpeggioType.ARPEGGIO_DIRECTIONLESS;
-                const directionAttr: Attr = arpeggioNode.attribute("direction");
-                if (directionAttr) {
-                  switch (directionAttr.value) {
-                    case "up":
-                      arpeggioType = ArpeggioType.ROLL_UP;
-                      break;
-                    case "down":
-                      arpeggioType = ArpeggioType.ROLL_DOWN;
-                      break;
-                    default:
-                      arpeggioType = ArpeggioType.ARPEGGIO_DIRECTIONLESS;
-                  }
-                }
-
-                currentArpeggio = new Arpeggio(this.currentVoiceEntry, arpeggioType);
-                this.currentVoiceEntry.Arpeggio = currentArpeggio;
-            }
+            this.moveArpeggioOwnerToLowestStaff(currentArpeggio);
           }
+          currentArpeggio.unbroken ||= arpeggioNode.attribute("unbroken")?.value === "yes";
           currentArpeggio.addNote(this.currentNote);
         }
         // check for Ties - must be the last check
@@ -259,6 +237,55 @@ export class VoiceGenerator {
     }
 
     return this.currentNote;
+  }
+
+  private arpeggioTypeFromDirection(direction: string): ArpeggioType {
+    switch (direction) {
+      case "up":
+        return ArpeggioType.ROLL_UP;
+      case "down":
+        return ArpeggioType.ROLL_DOWN;
+      default:
+        return ArpeggioType.ARPEGGIO_DIRECTIONLESS;
+    }
+  }
+
+  /** Find the same numbered simultaneous arpeggio anywhere in this instrument's vertical container. */
+  private findArpeggioAtCurrentTimestamp(number: number): Arpeggio {
+    const staffEntries: SourceStaffEntry[] = this.currentStaffEntry.VerticalContainerParent?.StaffEntries ?? [this.currentStaffEntry];
+    for (const staffEntry of staffEntries) {
+      if (!staffEntry || staffEntry.ParentStaff.ParentInstrument !== this.instrument) {
+        continue;
+      }
+      for (const voiceEntry of staffEntry.VoiceEntries) {
+        if (voiceEntry.Arpeggio?.number === number) {
+          return voiceEntry.Arpeggio;
+        }
+        const noteArpeggio: Arpeggio = voiceEntry.Notes.find((note: Note) => note.Arpeggio?.number === number)?.Arpeggio;
+        if (noteArpeggio) {
+          return noteArpeggio;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * VexFlow measures are prepared from the top staff down. Owning a cross-staff arpeggio on its lowest staff
+   * ensures that all upper endpoint StaveNotes exist before the one spanning stroke is attached.
+   */
+  private moveArpeggioOwnerToLowestStaff(arpeggio: Arpeggio): void {
+    const previousOwner: VoiceEntry = arpeggio.parentVoiceEntry;
+    const previousStaffId: number = previousOwner.ParentSourceStaffEntry.ParentStaff.Id;
+    const currentStaffId: number = this.currentVoiceEntry.ParentSourceStaffEntry.ParentStaff.Id;
+    if (currentStaffId <= previousStaffId) {
+      return;
+    }
+    if (previousOwner.Arpeggio === arpeggio) {
+      previousOwner.Arpeggio = undefined;
+    }
+    this.currentVoiceEntry.Arpeggio = arpeggio;
+    arpeggio.parentVoiceEntry = this.currentVoiceEntry;
   }
 
   /**

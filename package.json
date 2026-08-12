@@ -81,7 +81,7 @@
     "jszip": "3.10.1",
     "loglevel": "^1.8.0",
     "typescript-collections": "^1.3.3",
-    "vexflow": "git+https://github.com/bejomin/vexflow.git#ff9180814e5235158148f0837b46ec2da05c39e0"
+    "vexflow": "git+https://github.com/bejomin/vexflow.git#a5f158f0ef1b79e5eea08e061e0d0d071cb2cb89"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
