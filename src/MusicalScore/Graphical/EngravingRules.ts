@@ -593,6 +593,8 @@ export class EngravingRules {
     public FingeringPositionGrace: PlacementEnum;
     public FingeringInsideStafflines: boolean;
     public FingeringLabelFontHeight: number;
+    /** Horizontal clearance between a non-grace left-side fingering and its notehead, in OSMD units. */
+    public FingeringNoteheadXPadding: number;
     public FingeringOffsetX: number;
     public FingeringOffsetY: number;
     public FingeringPaddingY: number;
@@ -1116,6 +1118,7 @@ export class EngravingRules {
         this.FingeringPositionGrace = PlacementEnum.Left;
         this.FingeringInsideStafflines = false;
         this.FingeringLabelFontHeight = 1.7;
+        this.FingeringNoteheadXPadding = 0.2;
         this.FingeringOffsetX = 0.0;
         this.FingeringOffsetY = 0.0;
         this.FingeringPaddingY = -0.2;

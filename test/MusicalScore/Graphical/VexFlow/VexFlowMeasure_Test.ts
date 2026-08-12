@@ -28,6 +28,7 @@ import { GraphicalTie } from "../../../../src/MusicalScore/Graphical/GraphicalTi
 import { AccidentalEnum } from "../../../../src/Common/DataObjects/Pitch";
 import { PlacementEnum } from "../../../../src/MusicalScore/VoiceData/Expressions/AbstractExpression";
 import * as VF from "../../../../src/MusicalScore/Graphical/VexFlow/VexFlowAdapter";
+import { unitInPixels } from "../../../../src/MusicalScore/Graphical/VexFlow/VexFlowMusicSheetDrawer";
 
 describe("VexFlow Measure", () => {
 
@@ -610,6 +611,10 @@ describe("VexFlow Measure", () => {
       expect(leftFingerings.every(
          (fingering: VF.FretHandFinger): boolean => fingering.getPosition() === VF.Modifier.Position.LEFT,
       )).to.equal(true);
+      const expectedFingeringSizePx: number = osmd.EngravingRules.FingeringTextSize * unitInPixels;
+      expect(leftFingerings.every(
+         (fingering: VF.FretHandFinger): boolean => fingering.fontSizeInPixels === expectedFingeringSizePx,
+      ), "side fingerings use OSMD's configured fingering text size").to.equal(true);
       expect(trebleVexNote.getMetrics().modLeftPx, "left fingerings reserve horizontal space").to.be.greaterThan(0);
       expect(
          bassEntry.FingeringEntries.map((entry: GraphicalLabel): string => entry.Label.text).sort(),
@@ -617,6 +622,24 @@ describe("VexFlow Measure", () => {
       ).to.deep.equal(["1", "2", "4"]);
 
       const firstLeftExtent: number = trebleVexNote.getMetrics().modLeftPx;
+      const firstModifierWidth: number = leftFingerings[0].getWidth();
+      const defaultPaddingPx: number = osmd.EngravingRules.FingeringNoteheadXPadding * unitInPixels;
+      osmd.EngravingRules.FingeringNoteheadXPadding = 0;
+      osmd.updateGraphic();
+      osmd.render();
+      const unpaddedTreble: GraphicalMeasure = osmd.GraphicSheet.findGraphicalMeasure(0, 0);
+      const unpaddedNote: VF.StaveNote =
+         (unpaddedTreble.staffEntries[0].graphicalVoiceEntries[0] as VexFlowVoiceEntry).vfStaveNote as VF.StaveNote;
+      const unpaddedFingering: VF.FretHandFinger = unpaddedNote.getModifiers()
+         .find((modifier: VF.Modifier): modifier is VF.FretHandFinger =>
+            modifier instanceof VF.FretHandFinger) as VF.FretHandFinger;
+      expect(firstModifierWidth - unpaddedFingering.getWidth(), "padding moves the number away from the notehead")
+         .to.be.closeTo(defaultPaddingPx, 0.001);
+      expect(firstLeftExtent - unpaddedNote.getMetrics().modLeftPx, "padding is reserved during formatting")
+         .to.be.closeTo(defaultPaddingPx, 0.001);
+
+      osmd.EngravingRules.FingeringNoteheadXPadding = defaultPaddingPx / unitInPixels;
+      osmd.updateGraphic();
       osmd.render();
       const rerenderedTreble: GraphicalMeasure = osmd.GraphicSheet.findGraphicalMeasure(0, 0);
       const rerenderedNote: VF.StaveNote =

@@ -2104,6 +2104,20 @@ export class VexFlowMeasure extends GraphicalMeasure {
             const fretFinger: VF.FretHandFinger = new VF.FretHandFinger(fingering.value);
             fretFinger.setPosition(modifierPosition);
             fretFinger.setOffsetX(offsetX);
+            const isSideFingering: boolean = !isGrace &&
+                (fingeringPosition === PlacementEnum.Left || fingeringPosition === PlacementEnum.Right);
+            if (isSideFingering) {
+                // Side fingerings use VexFlow modifiers, while above/below fingerings
+                // use OSMD labels. Keep both paths at the configured OSMD text size.
+                fretFinger.setFontSize(`${this.rules.FingeringTextSize * unitInPixels}px`);
+            }
+            if (!isGrace && fingeringPosition === PlacementEnum.Left) {
+                // VexFlow draws a left fingering's right edge directly against the
+                // notehead. Growing the modifier width both opens the requested gap
+                // and reserves it in the modifier context used for horizontal spacing.
+                const noteheadPaddingPx: number = Math.max(0, this.rules.FingeringNoteheadXPadding) * unitInPixels;
+                fretFinger.setWidth(fretFinger.getWidth() + noteheadPaddingPx);
+            }
             if (fingeringPosition === PlacementEnum.Above || fingeringPosition === PlacementEnum.Below) {
                 const offsetYSign: number = fingeringPosition === PlacementEnum.Above ? -1 : 1; // minus y is up
                 const ordering: number = fingeringPosition === PlacementEnum.Above ? fingeringIndex :
