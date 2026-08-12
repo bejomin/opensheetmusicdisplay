@@ -151,6 +151,55 @@ function systemBreakScore(): string {
       </score-partwise>`;
 }
 
+function crossStaffSystemBreakScore(): string {
+   return `<?xml version="1.0" encoding="UTF-8"?>
+      <score-partwise version="4.0">
+         <part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
+         <part id="P1">
+            <measure number="1">
+               <attributes>
+                  <divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+                  <staves>2</staves>
+                  <clef number="1"><sign>G</sign><line>2</line></clef>
+                  <clef number="2"><sign>F</sign><line>4</line></clef>
+               </attributes>
+               <note><rest/><duration>4</duration><voice>1</voice><type>whole</type><staff>1</staff></note>
+               <backup><duration>4</duration></backup>
+               <note>
+                  <pitch><step>C</step><octave>3</octave></pitch>
+                  <duration>4</duration><voice>5</voice><type>whole</type><staff>2</staff>
+                  <notations><slur number="1" type="start" placement="above"/></notations>
+               </note>
+            </measure>
+            <measure number="2">
+               <print new-system="yes"/>
+               <note>
+                  <pitch><step>G</step><octave>4</octave></pitch>
+                  <duration>4</duration><voice>1</voice><type>whole</type><staff>1</staff>
+                  <notations><slur number="1" type="stop"/></notations>
+               </note>
+               <backup><duration>4</duration></backup>
+               <note><rest/><duration>4</duration><voice>5</voice><type>whole</type><staff>2</staff></note>
+            </measure>
+         </part>
+      </score-partwise>`;
+}
+
+function ledgerEndpointScore(): string {
+   return `<?xml version="1.0" encoding="UTF-8"?>
+      <score-partwise version="4.0">
+         <part-list><score-part id="P1"><part-name>Ledger slur</part-name></score-part></part-list>
+         <part id="P1"><measure number="1">
+            <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+               <clef><sign>G</sign><line>2</line></clef></attributes>
+            <note><pitch><step>C</step><octave>6</octave></pitch><duration>2</duration><voice>1</voice>
+               <type>half</type><notations><slur number="1" type="start" placement="above"/></notations></note>
+            <note><pitch><step>D</step><octave>6</octave></pitch><duration>2</duration><voice>1</voice>
+               <type>half</type><notations><slur number="1" type="stop"/></notations></note>
+         </measure></part>
+      </score-partwise>`;
+}
+
 function multiSystemArticulationScore(): string {
    return `<?xml version="1.0" encoding="UTF-8"?>
       <score-partwise version="4.0">
@@ -497,6 +546,20 @@ describe("Stage 6 slur geometry", (): void => {
       expect(obstacles.some((obstacle) => obstacle.type === "beam" && obstacle.endpoint)).to.equal(true);
    });
 
+   it("collects finalized ledger lines as typed endpoint obstacles", async (): Promise<void> => {
+      const osmd: OpenSheetMusicDisplay =
+         TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+      await osmd.load(ledgerEndpointScore());
+      osmd.render();
+
+      const obstacles: SlurObstacle[] = allSlurs(osmd).flatMap(
+         ({slur}) => slur.layoutContext?.obstacles ?? [],
+      );
+      expect(obstacles.some(
+         (obstacle): boolean => obstacle.type === "ledger-line" && Boolean(obstacle.endpoint),
+      )).to.equal(true);
+   });
+
    it("links cross-system segments with shared placement and horizontal break tangents", async (): Promise<void> => {
       const osmd: OpenSheetMusicDisplay =
          TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
@@ -508,7 +571,11 @@ describe("Stage 6 slur geometry", (): void => {
       const segments: GraphicalSlur[] = allSlurs(osmd)
          .map(({slur}) => slur)
          .sort((left, right): number => left.diagnostics.segmentIndex - right.diagnostics.segmentIndex);
-      expect(segments).to.have.length(2);
+      expect(
+         segments,
+         `systems=${osmd.GraphicSheet.MusicPages.flatMap((page) => page.MusicSystems).length}; ` +
+         `all-slurs=${allSlurs(osmd).length}`,
+      ).to.have.length(2);
       expect(segments[0].diagnostics.segmentCount).to.equal(2);
       expect(segments[1].diagnostics.segmentCount).to.equal(2);
       expect(segments[0].diagnostics.placement).to.equal(segments[1].diagnostics.placement);
@@ -528,6 +595,35 @@ describe("Stage 6 slur geometry", (): void => {
          segments[1].diagnostics.endNotehead.left - 1,
          segments[1].diagnostics.endNotehead.right + 1,
       );
+   });
+
+   it("links cross-staff slurs across a system break", async (): Promise<void> => {
+      const osmd: OpenSheetMusicDisplay =
+         TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+      await osmd.load(crossStaffSystemBreakScore());
+      osmd.Sheet.Rules.NewSystemAtXMLNewSystemAttribute = true;
+      osmd.updateGraphic();
+      osmd.render();
+
+      const segments: GraphicalSlur[] = allSlurs(osmd)
+         .map(({slur}) => slur)
+         .filter((slur): boolean => slur.slur.isCrossed())
+         .sort((left, right): number => left.diagnostics.segmentIndex - right.diagnostics.segmentIndex);
+      expect(segments).to.have.length(2);
+      expect(segments.map((segment) => segment.diagnostics.segmentIndex)).to.deep.equal([0, 1]);
+      expect(segments.every((segment) => segment.diagnostics.segmentCount === 2)).to.equal(true);
+      expect(segments.every((segment) => segment.diagnostics.unsupportedRouting === undefined)).to.equal(true);
+      expect(segments.flatMap((segment) => segment.diagnostics.structuredFaults ?? [])).to.have.length(0);
+      expect(segments[0].diagnostics.endAttachment).to.equal("system-edge");
+      expect(segments[1].diagnostics.startAttachment).to.equal("system-edge");
+      expect(segments[0].bezierEndControlPt.y).to.be.closeTo(segments[0].bezierEndPt.y, 0.001);
+      expect(segments[1].bezierStartControlPt.y).to.be.closeTo(segments[1].bezierStartPt.y, 0.001);
+      for (const segment of segments) {
+         expect([segment.bezierStartPt, segment.bezierStartControlPt,
+            segment.bezierEndControlPt, segment.bezierEndPt].every(
+            (point): boolean => Number.isFinite(point.x) && Number.isFinite(point.y),
+         )).to.equal(true);
+      }
    });
 
    for (const fixture of [

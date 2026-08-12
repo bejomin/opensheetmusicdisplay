@@ -22,6 +22,7 @@ import {
     SlurBounds,
     SlurCurveCandidate,
     SlurCurveGeometry,
+    SlurContinuationBoundaryTarget,
     SlurEndpointAttachment,
     SlurEndpointContext,
     SlurLayoutContext,
@@ -77,6 +78,7 @@ export interface GraphicalSlurDiagnostics {
     placementCandidateScores?: Partial<Record<"above" | "below", number>>;
     linkedGroupId?: string;
     continuationClearance?: number;
+    continuationBoundaryTargets?: readonly SlurContinuationBoundaryTarget[];
     linkedTangentMismatch?: number;
 }
 
@@ -92,6 +94,7 @@ interface RenderedSlurEndpointGeometry {
         bounds: GraphicalSlurBoundsDiagnostics;
     }[];
     beamPolygons: PointF2D[][];
+    ledgerLines: {start: PointF2D, end: PointF2D}[];
     accidentals: GraphicalSlurBoundsDiagnostics[];
     tuplets: GraphicalSlurBoundsDiagnostics[];
 }
@@ -177,6 +180,7 @@ export class GraphicalSlur extends GraphicalCurve {
     public setLinkedLayoutDiagnostics(diagnostics: SlurLinkedLayoutDiagnostics): void {
         this.diagnostics.linkedGroupId = diagnostics.groupId;
         this.diagnostics.continuationClearance = diagnostics.continuationClearance;
+        this.diagnostics.continuationBoundaryTargets = [...diagnostics.boundaryTargets];
         this.diagnostics.linkedTangentMismatch = diagnostics.tangentMismatch;
         this.diagnostics.structuredFaults = [...diagnostics.faults];
     }
@@ -337,6 +341,11 @@ export class GraphicalSlur extends GraphicalCurve {
             .map((polygon): PointF2D[] => polygon.points.map(
                 (point): PointF2D => toStaffLinePoint(point.x, point.y),
             ));
+        const ledgerLines: {start: PointF2D, end: PointF2D}[] =
+            (vfNote.getRenderedLedgerLineSegments?.() ?? []).map((segment): {start: PointF2D, end: PointF2D} => ({
+                start: toStaffLinePoint(segment.x1, segment.y1),
+                end: toStaffLinePoint(segment.x2, segment.y2),
+            }));
         const tuplets: GraphicalSlurBoundsDiagnostics[] = (vfNote.getTupletStack?.() ?? [])
             .map((tuplet): GraphicalSlurBoundsDiagnostics => {
                 const boundingBox: any = tuplet.getBoundingBox?.();
@@ -344,7 +353,7 @@ export class GraphicalSlur extends GraphicalCurve {
             })
             .filter(Boolean);
 
-        return {notehead, stem, articulations, beamPolygons, accidentals, tuplets};
+        return {notehead, stem, articulations, beamPolygons, ledgerLines, accidentals, tuplets};
     }
 
     /** Find the finalized beam's outer edge exactly above or below the endpoint stem. */
@@ -1008,6 +1017,14 @@ export class GraphicalSlur extends GraphicalCurve {
                             bottom: Math.max(...ys),
                         }, `${prefix}-beam-${beamIndex}`, endpoint, undefined, polygon);
                     });
+                    geometry.ledgerLines.forEach((segment, ledgerIndex): void => {
+                        addBounds("ledger-line", {
+                            left: Math.min(segment.start.x, segment.end.x),
+                            right: Math.max(segment.start.x, segment.end.x),
+                            top: Math.min(segment.start.y, segment.end.y),
+                            bottom: Math.max(segment.start.y, segment.end.y),
+                        }, `${prefix}-ledger-${ledgerIndex}`, endpoint);
+                    });
                     geometry.articulations.forEach((articulation, articulationIndex): void => {
                         const classification: SlurArticulationClass = this.classifyArticulation(
                             articulation.modifier?.osmdArticulationEnum,
@@ -1452,6 +1469,10 @@ export class GraphicalSlur extends GraphicalCurve {
                 beamPolygons: geometry.beamPolygons.map((polygon): PointF2D[] =>
                     polygon.map((point): PointF2D => new PointF2D(point.x, point.y + offset)),
                 ),
+                ledgerLines: geometry.ledgerLines.map((segment) => ({
+                    start: new PointF2D(segment.start.x, segment.start.y + offset),
+                    end: new PointF2D(segment.end.x, segment.end.y + offset),
+                })),
                 accidentals: geometry.accidentals.map(
                     (bounds): GraphicalSlurBoundsDiagnostics => translateBounds(bounds, offset),
                 ),
@@ -1600,6 +1621,14 @@ export class GraphicalSlur extends GraphicalCurve {
                                     top: Math.min(...ys),
                                     bottom: Math.max(...ys),
                                 }, `${prefix}-beam-${index}`, endpoint, polygon);
+                            });
+                            geometry.ledgerLines.forEach((segment, index): void => {
+                                addObstacle("ledger-line", {
+                                    left: Math.min(segment.start.x, segment.end.x),
+                                    right: Math.max(segment.start.x, segment.end.x),
+                                    top: Math.min(segment.start.y, segment.end.y),
+                                    bottom: Math.max(segment.start.y, segment.end.y),
+                                }, `${prefix}-ledger-${index}`, endpoint);
                             });
                         }
                     }

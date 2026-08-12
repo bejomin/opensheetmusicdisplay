@@ -7,6 +7,7 @@ import {
 import {
   SlurCurveGeometry,
   SlurCurveCandidate,
+  SlurContinuationBoundaryTarget,
   SlurLayoutContext,
   SlurLayoutFault,
   SlurLayoutResult,
@@ -64,10 +65,52 @@ function boundaryClearance(context: SlurLayoutContext, side: "start" | "end"): n
   return Math.max(1.2, Math.min(6, distance + 0.45));
 }
 
-function continuationTarget(context: SlurLayoutContext, clearance: number): number {
+function unboundedContinuationTarget(context: SlurLayoutContext, clearance: number): number {
   return context.direction === PlacementEnum.Above
     ? context.envelope.topLineOffset - clearance
     : context.envelope.bottomLineOffset + clearance;
+}
+
+function continuationBoundaryTarget(
+  context: SlurLayoutContext,
+  side: "start" | "end",
+  clearance: number,
+): SlurContinuationBoundaryTarget {
+  let target: number = unboundedContinuationTarget(context, clearance);
+  const opposite: SlurLayoutContext["start"] = side === "start" ? context.end : context.start;
+  if (!opposite.systemBoundary) {
+    const boundary: SlurLayoutContext["start"] = side === "start" ? context.start : context.end;
+    const run: number = Math.abs(opposite.seedAnchor.x - boundary.seedAnchor.x);
+    const returningCrossStaffSlur: boolean =
+      side === "start" && context.isCrossStaff && context.isCrossSystem;
+    const oppositeAnchorY: number = returningCrossStaffSlur && opposite.notehead
+      ? context.direction === PlacementEnum.Above
+        ? opposite.notehead.top - 0.35
+        : opposite.notehead.bottom + 0.35
+      : opposite.seedAnchor.y;
+    // A continuation very close to its real note must read as the end of that
+    // phrase, not as a diagonal joining the note to a globally high skyline.
+    // Permit more vertical travel as horizontal room becomes available, while
+    // still allowing collision retries to raise a crowded route modestly.
+    const retryAllowance: number = returningCrossStaffSlur
+      ? 0
+      : Math.max(0, clearance - 1.2) * 0.2;
+    const travelFactor: number = returningCrossStaffSlur ? 0.25 : 0.42;
+    const maximumTravel: number = Math.max(0.8, Math.min(3, run * travelFactor + retryAllowance));
+    target = context.direction === PlacementEnum.Above
+      ? Math.max(target, oppositeAnchorY - maximumTravel)
+      : Math.min(target, oppositeAnchorY + maximumTravel);
+  }
+  const effectiveClearance: number = context.direction === PlacementEnum.Above
+    ? context.envelope.topLineOffset - target
+    : target - context.envelope.bottomLineOffset;
+  return {
+    segmentIndex: context.segmentIndex,
+    side,
+    requestedClearance: clearance,
+    effectiveClearance,
+    target,
+  };
 }
 
 /**
@@ -87,22 +130,27 @@ function normalizeContinuationGeometry(
   if (!startBoundary && !endBoundary) {
     return geometry;
   }
-  const target: number = continuationTarget(context, clearance);
+  const startTarget: number = context.start.systemBoundary
+    ? continuationBoundaryTarget(context, "start", clearance).target
+    : context.start.seedAnchor.y;
+  const endTarget: number = context.end.systemBoundary
+    ? continuationBoundaryTarget(context, "end", clearance).target
+    : context.end.seedAnchor.y;
   if (startBoundary) {
-    geometry.p0.y = target;
+    geometry.p0.y = startTarget;
   }
   if (endBoundary) {
-    geometry.p3.y = target;
+    geometry.p3.y = endTarget;
   }
   const width: number = geometry.p3.x - geometry.p0.x;
   if (startBoundary && endBoundary) {
-    geometry.p1 = new PointF2D(geometry.p0.x + width / 3, target);
-    geometry.p2 = new PointF2D(geometry.p0.x + width * 2 / 3, target);
+    geometry.p1 = new PointF2D(geometry.p0.x + width / 3, startTarget);
+    geometry.p2 = new PointF2D(geometry.p0.x + width * 2 / 3, endTarget);
     return geometry;
   }
   const control: PointF2D = startBoundary
-    ? new PointF2D(geometry.p0.x + width * 0.35, target)
-    : new PointF2D(geometry.p0.x + width * 0.65, target);
+    ? new PointF2D(geometry.p0.x + width * 0.35, startTarget)
+    : new PointF2D(geometry.p0.x + width * 0.65, endTarget);
   geometry.p1 = new PointF2D(
     geometry.p0.x + (control.x - geometry.p0.x) * 2 / 3,
     geometry.p0.y + (control.y - geometry.p0.y) * 2 / 3,
@@ -207,6 +255,18 @@ export function calculateLinkedSlurLayouts(
       ? rejectedCandidateScore
       : selected.score.total);
   }, tangentMismatch * options.scoreWeights.systemContinuity);
+  const boundaryTargets: SlurContinuationBoundaryTarget[] = ordered.flatMap(
+    (input): SlurContinuationBoundaryTarget[] => {
+      const targets: SlurContinuationBoundaryTarget[] = [];
+      if (input.context.start.systemBoundary) {
+        targets.push(continuationBoundaryTarget(input.context, "start", routedClearance));
+      }
+      if (input.context.end.systemBoundary) {
+        targets.push(continuationBoundaryTarget(input.context, "end", routedClearance));
+      }
+      return targets;
+    },
+  );
   return {
     results,
     diagnostics: {
@@ -215,6 +275,7 @@ export function calculateLinkedSlurLayouts(
       segmentIndexes: ordered.map((input) => input.context.segmentIndex),
       totalScore,
       tangentMismatch,
+      boundaryTargets,
       faults,
     },
   };

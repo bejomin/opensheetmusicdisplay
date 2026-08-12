@@ -22,6 +22,7 @@ export type SlurObstacleType =
     | "notehead"
     | "stem"
     | "beam"
+    | "ledger-line"
     | "accidental"
     | "tie"
     | "duration-articulation"
@@ -144,7 +145,16 @@ export interface SlurLinkedLayoutDiagnostics {
     segmentIndexes: readonly number[];
     totalScore: number;
     tangentMismatch: number;
+    boundaryTargets: readonly SlurContinuationBoundaryTarget[];
     faults: readonly SlurLayoutFault[];
+}
+
+export interface SlurContinuationBoundaryTarget {
+    segmentIndex: number;
+    side: SlurEndpointSide;
+    requestedClearance: number;
+    effectiveClearance: number;
+    target: number;
 }
 
 export interface SlurAnchorPenalties {

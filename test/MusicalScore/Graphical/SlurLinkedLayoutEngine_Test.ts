@@ -126,6 +126,45 @@ describe("linked slur layout engine", (): void => {
     )).to.equal(true);
   });
 
+  it("bounds continuation travel when a real note sits close to the system edge", (): void => {
+    const first: SlurLinkedLayoutInput = input(0, false, true);
+    const second: SlurLinkedLayoutInput = input(1, true, false);
+    first.context.start.seedAnchor.x = 15;
+    first.context.start.notehead = {left: 14.5, right: 15.5, top: 1.5, bottom: 2.5};
+    first.seed.p0.x = 15;
+    second.context.end.seedAnchor.x = 5;
+    second.context.end.notehead = {left: 4.5, right: 5.5, top: 1.5, bottom: 2.5};
+    second.seed.p3.x = 5;
+
+    const output: SlurLinkedLayoutOutput = calculateLinkedSlurLayouts([first, second], options);
+    const opening: SlurCurveGeometry = output.results[0].geometry;
+    const returning: SlurCurveGeometry = output.results[1].geometry;
+
+    expect(Math.abs(opening.p3.y - first.context.start.seedAnchor.y)).to.be.lessThan(1.5);
+    expect(Math.abs(returning.p0.y - second.context.end.seedAnchor.y)).to.be.lessThan(1.5);
+    expect(opening.p2.y).to.equal(opening.p3.y);
+    expect(returning.p1.y).to.equal(returning.p0.y);
+    expect(output.diagnostics.boundaryTargets).to.have.length(2);
+  });
+
+  it("bases a returning cross-staff boundary on the destination notehead", (): void => {
+    const first: SlurLinkedLayoutInput = input(0, false, true);
+    const second: SlurLinkedLayoutInput = input(1, true, false);
+    second.context.isCrossStaff = true;
+    second.context.isCrossSystem = true;
+    second.context.end.seedAnchor.y = 6;
+    second.context.end.notehead = {left: 17.5, right: 18.5, top: 1.5, bottom: 2.5};
+    second.seed.p3.y = 6;
+
+    const output: SlurLinkedLayoutOutput = calculateLinkedSlurLayouts([first, second], options);
+    const returningTarget: number = output.diagnostics.boundaryTargets.find(
+      (target): boolean => target.segmentIndex === 1 && target.side === "start",
+    ).target;
+
+    expect(returningTarget).to.be.lessThan(3);
+    expect(Math.abs(returningTarget - 1.15)).to.be.lessThan(Math.abs(returningTarget - 6));
+  });
+
   it("reports incompatible linked placement as a structured fault", (): void => {
     const output: SlurLinkedLayoutOutput = calculateLinkedSlurLayouts(
       [input(0, false, true), input(1, true, false, PlacementEnum.Below)],

@@ -2618,6 +2618,43 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
     }
     return -1;
   }
+
+  private addCrossStaffSystemBreakSegments(
+    slur: Slur,
+    startSegment: GraphicalSlur,
+    startStaffLine: StaffLine,
+    startStaffEntry: GraphicalStaffEntry,
+  ): void {
+    const endNote: GraphicalNote = this.rules.GNote(slur.EndNote);
+    const endStaffEntry: GraphicalStaffEntry = endNote?.parentVoiceEntry?.parentStaffEntry;
+    const endStaffLine: StaffLine = endStaffEntry?.parentMeasure?.ParentStaffLine;
+    const startSystemIndex: number = this.musicSystems.indexOf(startStaffLine.ParentMusicSystem);
+    const endSystemIndex: number = this.musicSystems.indexOf(endStaffLine?.ParentMusicSystem);
+    if (!endStaffLine || startSystemIndex < 0 || endSystemIndex <= startSystemIndex) {
+      startSegment.staffEntries = [startStaffEntry];
+      return;
+    }
+
+    startSegment.staffEntries = [startStaffEntry];
+    for (let systemIndex: number = startSystemIndex + 1; systemIndex <= endSystemIndex; systemIndex++) {
+      const musicSystem: MusicSystem = this.musicSystems[systemIndex];
+      const isFinal: boolean = systemIndex === endSystemIndex;
+      const staffLine: StaffLine = isFinal
+        ? endStaffLine
+        : musicSystem.StaffLines.find(
+          (candidate): boolean => candidate.ParentStaff === startStaffLine.ParentStaff,
+        ) ?? musicSystem.StaffLines[0];
+      const segment: GraphicalSlur = new GraphicalSlur(slur, this.rules);
+      const entries: GraphicalStaffEntry[] = isFinal
+        ? [endStaffEntry]
+        : staffLine.Measures.flatMap((measure): GraphicalStaffEntry[] => measure.staffEntries);
+      if (entries.length === 0) {
+        continue;
+      }
+      segment.staffEntries = entries;
+      staffLine.addSlurToStaffline(segment);
+    }
+  }
   public indexOfGraphicalGlissFromGliss(gGlissandi: GraphicalGlissando[], glissando: Glissando): number {
     for (let glissIndex: number = 0; glissIndex < gGlissandi.length; glissIndex++) {
       if (gGlissandi[glissIndex].Glissando === glissando) {
@@ -2705,12 +2742,15 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
                       const gSlur: GraphicalSlur = new GraphicalSlur(slur, this.rules);
                       staffLine.addSlurToStaffline(gSlur);
                       if (slur.isCrossed()) {
-                        // A cross-staff slur (e.g. left hand to right hand) ends on a different staff, so it
-                        // would never be closed by the per-staff open/close mechanism below - which would leave
-                        // it open and spawn phantom continuation slurs on every following staffline. Keep it out
-                        // of openGraphicalSlurs; its curve is calculated separately at draw time (spanning both
-                        // stafflines). It still needs a staffEntry for GraphicalSlur.Compare's sorting.
-                        gSlur.staffEntries = [graphicalStaffEntry];
+                        // Cross-staff slurs are not tracked in a physical staff's open list. When the destination
+                        // lies in another system, create one explicit segment per intervening system so the linked
+                        // solver can give both real endpoints a staff-local coordinate frame.
+                        this.addCrossStaffSystemBreakSegments(
+                          slur,
+                          gSlur,
+                          staffLine,
+                          graphicalStaffEntry,
+                        );
                       } else {
                         openGraphicalSlurs.push(gSlur);
                       }
@@ -2800,14 +2840,18 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
         const startLine: StaffLine = startNote?.parentVoiceEntry?.parentStaffEntry?.parentMeasure?.ParentStaffLine;
         const endLine: StaffLine = endNote?.parentVoiceEntry?.parentStaffEntry?.parentMeasure?.ParentStaffLine;
         if (startLine && endLine && startLine.ParentMusicSystem !== endLine.ParentMusicSystem) {
-          for (const {segment} of linkedSegments) {
-            segment.markUnsupportedCrossStaffSystemBreak();
+          const crossedPlacementSegment: GraphicalSlur =
+            linkedSegments.find(({staffLine}): boolean => staffLine === startLine)?.segment
+            ?? linkedSegments[0].segment;
+          const crossedPlacement: PlacementEnum = crossedPlacementSegment.determinePlacement();
+          for (let index: number = 0; index < linkedSegments.length; index++) {
+            linkedSegments[index].segment.setLinkedSegment(
+              index,
+              linkedSegments.length,
+              crossedPlacement,
+              linkedGroupId,
+            );
           }
-          log.warn(
-            "Cross-staff slur across a system break is not yet supported " +
-            `(measures ${sourceSlur.StartNote.SourceMeasure.MeasureNumber}–` +
-            `${sourceSlur.EndNote.SourceMeasure.MeasureNumber}).`,
-          );
         }
         continue;
       }
@@ -2857,71 +2901,72 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
             || left.EndNote.getAbsoluteTimestamp().RealValue - right.EndNote.getAbsoluteTimestamp().RealValue;
         });
     for (const [, linkedSegments] of orderedGroups) {
-      const sortedSegments: {segment: GraphicalSlur, staffLine: StaffLine}[] = [...linkedSegments].sort(
-        (left, right): number => left.segment.diagnostics.segmentIndex - right.segment.diagnostics.segmentIndex,
-      );
-      const linkedGroupId: string = sortedSegments[0].segment.diagnostics.linkedGroupId;
-      const calculatePlacementRoute: (placement: PlacementEnum) => SlurLinkedLayoutOutput | undefined =
-        (placement: PlacementEnum): SlurLinkedLayoutOutput | undefined => {
-          const inputs: SlurLinkedLayoutInput[] = [];
-          for (let index: number = 0; index < sortedSegments.length; index++) {
-            const {segment, staffLine} = sortedSegments[index];
-            segment.setLinkedSegment(index, sortedSegments.length, placement, linkedGroupId);
-            segment.calculateCurve(this.rules, true);
-            segment.refreshCandidateLayoutContext(staffLine);
-            const context: SlurLayoutContext = segment.layoutContext;
-            const seed: SlurCurveGeometry = segment.getCandidateSeed();
-            if (context && seed) {
-              inputs.push({context, seed});
-            }
-          }
-          if (inputs.length !== sortedSegments.length) {
-            return undefined;
-          }
-          return calculateLinkedSlurLayouts(inputs, {
-            candidateLimit: this.rules.SlurCandidateLimit,
-            diagnosticsLevel: this.rules.SlurDiagnosticsLevel,
-            maximumPreferredClearance: this.rules.SlurMaximumPreferredClearance,
-            obstacleClearance: this.rules.SlurObstacleClearance,
-            scoreWeights: this.rules.SlurCandidateScoreWeights,
-          });
-        };
-      const routeScore: (output: SlurLinkedLayoutOutput | undefined) => number =
-        (output: SlurLinkedLayoutOutput | undefined): number => {
-          if (!output) {
-            return Number.POSITIVE_INFINITY;
-          }
-          return output.diagnostics.totalScore;
-        };
+      this.calculateLinkedSlurGroup(linkedSegments);
+    }
+  }
 
-      const automaticPlacement: PlacementEnum = sortedSegments[0].segment.placement;
-      let selectedPlacement: PlacementEnum = automaticPlacement;
-      if (sortedSegments[0].segment.canCompareAutomaticPlacements()) {
-        const aboveOutput: SlurLinkedLayoutOutput = calculatePlacementRoute(PlacementEnum.Above);
-        const belowOutput: SlurLinkedLayoutOutput = calculatePlacementRoute(PlacementEnum.Below);
-        const aboveScore: number = routeScore(aboveOutput);
-        const belowScore: number = routeScore(belowOutput);
-        selectedPlacement = aboveScore < belowScore
-          ? PlacementEnum.Above
-          : belowScore < aboveScore
-            ? PlacementEnum.Below
-            : automaticPlacement;
-        for (const {segment} of sortedSegments) {
-          segment.setPlacementCandidateScores(aboveScore, belowScore);
+  private calculateLinkedSlurGroup(
+    linkedSegments: {segment: GraphicalSlur, staffLine: StaffLine}[],
+  ): boolean {
+    const sortedSegments: {segment: GraphicalSlur, staffLine: StaffLine}[] = [...linkedSegments].sort(
+      (left, right): number => left.segment.diagnostics.segmentIndex - right.segment.diagnostics.segmentIndex,
+    );
+    const linkedGroupId: string = sortedSegments[0].segment.diagnostics.linkedGroupId;
+    const calculatePlacementRoute: (placement: PlacementEnum) => SlurLinkedLayoutOutput | undefined =
+      (placement: PlacementEnum): SlurLinkedLayoutOutput | undefined => {
+        const inputs: SlurLinkedLayoutInput[] = [];
+        for (let index: number = 0; index < sortedSegments.length; index++) {
+          const {segment, staffLine} = sortedSegments[index];
+          segment.setLinkedSegment(index, sortedSegments.length, placement, linkedGroupId);
+          segment.calculateCurve(this.rules, true);
+          segment.refreshCandidateLayoutContext(staffLine);
+          const context: SlurLayoutContext = segment.layoutContext;
+          const seed: SlurCurveGeometry = segment.getCandidateSeed();
+          if (context && seed) {
+            inputs.push({context, seed});
+          }
         }
-      }
-      // Recalculate the selected side so endpoint bindings, typed obstacles,
-      // and immutable contexts all describe the geometry that will be applied.
-      const linkedOutput: SlurLinkedLayoutOutput = calculatePlacementRoute(selectedPlacement);
-      if (!linkedOutput) {
-        continue;
-      }
-      for (let index: number = 0; index < sortedSegments.length; index++) {
-        const {segment, staffLine} = sortedSegments[index];
-        segment.setLinkedLayoutDiagnostics(linkedOutput.diagnostics);
-        segment.applyCandidateLayoutResult(linkedOutput.results[index], staffLine);
+        if (inputs.length !== sortedSegments.length) {
+          return undefined;
+        }
+        return calculateLinkedSlurLayouts(inputs, {
+          candidateLimit: this.rules.SlurCandidateLimit,
+          diagnosticsLevel: this.rules.SlurDiagnosticsLevel,
+          maximumPreferredClearance: this.rules.SlurMaximumPreferredClearance,
+          obstacleClearance: this.rules.SlurObstacleClearance,
+          scoreWeights: this.rules.SlurCandidateScoreWeights,
+        });
+      };
+    const routeScore: (output: SlurLinkedLayoutOutput | undefined) => number =
+      (output: SlurLinkedLayoutOutput | undefined): number =>
+        output?.diagnostics.totalScore ?? Number.POSITIVE_INFINITY;
+
+    const automaticPlacement: PlacementEnum = sortedSegments[0].segment.placement;
+    let selectedPlacement: PlacementEnum = automaticPlacement;
+    if (sortedSegments[0].segment.canCompareAutomaticPlacements()) {
+      const aboveOutput: SlurLinkedLayoutOutput = calculatePlacementRoute(PlacementEnum.Above);
+      const belowOutput: SlurLinkedLayoutOutput = calculatePlacementRoute(PlacementEnum.Below);
+      const aboveScore: number = routeScore(aboveOutput);
+      const belowScore: number = routeScore(belowOutput);
+      selectedPlacement = aboveScore < belowScore
+        ? PlacementEnum.Above
+        : belowScore < aboveScore
+          ? PlacementEnum.Below
+          : automaticPlacement;
+      for (const {segment} of sortedSegments) {
+        segment.setPlacementCandidateScores(aboveScore, belowScore);
       }
     }
+    const linkedOutput: SlurLinkedLayoutOutput = calculatePlacementRoute(selectedPlacement);
+    if (!linkedOutput) {
+      return false;
+    }
+    for (let index: number = 0; index < sortedSegments.length; index++) {
+      const {segment, staffLine} = sortedSegments[index];
+      segment.setLinkedLayoutDiagnostics(linkedOutput.diagnostics);
+      segment.applyCandidateLayoutResult(linkedOutput.results[index], staffLine);
+    }
+    return true;
   }
 
   /** Calculate cross-staff slurs after the system builder has fixed both staves' y positions. */
@@ -2930,13 +2975,30 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
     if (!this.rules.RenderSlursAcrossStaves) {
       return;
     }
+    const segmentsBySource: Map<Slur, {segment: GraphicalSlur, staffLine: StaffLine}[]> = new Map();
     for (const musicSystem of this.musicSystems) {
       for (const staffLine of musicSystem.StaffLines) {
         for (const graphicalSlur of staffLine.GraphicalSlurs) {
           if (graphicalSlur.slur.isCrossed()) {
-            graphicalSlur.calculateCurveCrossStaff(this.rules);
+            const linkedSegments: {segment: GraphicalSlur, staffLine: StaffLine}[] =
+              segmentsBySource.get(graphicalSlur.slur) ?? [];
+            linkedSegments.push({segment: graphicalSlur, staffLine});
+            segmentsBySource.set(graphicalSlur.slur, linkedSegments);
           }
         }
+      }
+    }
+    for (const [sourceSlur, linkedSegments] of segmentsBySource) {
+      const startNote: GraphicalNote = this.rules.GNote(sourceSlur.StartNote);
+      const endNote: GraphicalNote = this.rules.GNote(sourceSlur.EndNote);
+      const startLine: StaffLine = startNote?.parentVoiceEntry?.parentStaffEntry?.parentMeasure?.ParentStaffLine;
+      const endLine: StaffLine = endNote?.parentVoiceEntry?.parentStaffEntry?.parentMeasure?.ParentStaffLine;
+      if (startLine && endLine && startLine.ParentMusicSystem !== endLine.ParentMusicSystem) {
+        this.calculateLinkedSlurGroup(linkedSegments);
+        continue;
+      }
+      for (const {segment} of linkedSegments) {
+        segment.calculateCurveCrossStaff(this.rules);
       }
     }
   }

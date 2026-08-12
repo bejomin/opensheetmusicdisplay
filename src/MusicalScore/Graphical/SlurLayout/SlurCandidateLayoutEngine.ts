@@ -148,6 +148,8 @@ export function generateSlurAnchors(
     const seedPoint: PointF2D = side === "start" ? seed.p0 : seed.p3;
     let generationIndex: number = 0;
     const direction: number = context.direction === PlacementEnum.Above ? -1 : 1;
+    const returnsAcrossSystems: boolean =
+      context.isCrossStaff && context.isCrossSystem && side === "end" && context.start.systemBoundary;
     const noteheadCenterX: number | undefined = endpoint.notehead
       ? (endpoint.notehead.left + endpoint.notehead.right) / 2
       : undefined;
@@ -189,7 +191,10 @@ export function generateSlurAnchors(
     if (
       !seedStemHasFinalGeometry &&
       !seedContainerHasFinalGeometry &&
-      !unreliableSeedStem
+      !unreliableSeedStem &&
+      !(returnsAcrossSystems && ["beam-side", "stem", "stem-side", "stem-tip"].includes(
+        endpoint.seedAttachment,
+      ))
     ) {
       result[side].push(
         makeAnchor(
@@ -224,9 +229,24 @@ export function generateSlurAnchors(
           0,
         ),
       );
-      const x: number =
-        side === "start" ? endpoint.notehead.right + 0.08 : endpoint.notehead.left - 0.08;
-      const sameSideBounds: SlurBounds[] = [endpoint.notehead, ...endpoint.accidentals];
+      const endpointLedgerLines: SlurObstacle[] = endpoint.chordSize <= 1
+        ? context.obstacles.filter(
+          (obstacle): boolean => obstacle.type === "ledger-line" &&
+            (obstacle.endpoint === side || obstacle.endpoint === "both"),
+        )
+        : [];
+      const endpointOuterBounds: SlurBounds[] = [
+        endpoint.notehead,
+        ...endpoint.accidentals,
+        ...endpointLedgerLines.map((obstacle): SlurBounds => obstacle.bounds),
+      ];
+      const shoulderGap: number = endpointLedgerLines.length > 0 ? endpointGap + 0.02 : 0.08;
+      const x: number = side === "start"
+        ? Math.max(...endpointOuterBounds.map((bounds): number => bounds.right)) + shoulderGap
+        : Math.min(...endpointOuterBounds.map((bounds): number => bounds.left)) - shoulderGap;
+      const sameSideBounds: SlurBounds[] = endpointLedgerLines.length > 0
+        ? [endpoint.notehead]
+        : [endpoint.notehead, ...endpoint.accidentals];
       const y: number =
         (direction < 0
           ? Math.min(...sameSideBounds.map((bounds): number => bounds.top))
@@ -269,7 +289,11 @@ export function generateSlurAnchors(
         );
       }
     }
-    if (endpoint.beamSideAnchor || endpoint.beams.length > 0) {
+    if (
+      !returnsAcrossSystems &&
+      endpoint.stemSide &&
+      (endpoint.beamSideAnchor || endpoint.beams.length > 0)
+    ) {
       const x: number = endpoint.beamSideAnchor?.x ?? (endpoint.stem
         ? (endpoint.stem.left + endpoint.stem.right) / 2
         : seedPoint.x);
@@ -292,7 +316,7 @@ export function generateSlurAnchors(
         ),
       );
     }
-    if (endpoint.stem && endpoint.stemSide) {
+    if (!returnsAcrossSystems && endpoint.stem && endpoint.stemSide) {
       const displacement: number = Math.hypot(
         stemTipX - seedPoint.x,
         stemTipY - seedPoint.y,
@@ -652,17 +676,17 @@ function familyGeometry(
     // it relative to the newly selected span. A moved local endpoint must not
     // inherit the full depth of a remote notehead route. Dense notation is
     // handled by the high family's sampled obstacle clearance below.
-    minimumBow = Math.max(minimumBow, Math.min(seedBow, minimumBow * 2.2));
+    minimumBow = Math.max(minimumBow, Math.min(seedBow, minimumBow * 1.9));
   } else {
     // The exact source route remains a separate normal candidate. Regenerated
     // notehead routes retain the source contour only up to a span-relative
     // cap, so an exported bezier cannot force every semantic alternative to
     // reproduce its excessive bow. Compact phrases use the tighter cap; the
     // high family below remains responsible for real obstacle clearance.
-    minimumBow = Math.max(
-      minimumBow,
-      Math.abs(width) < 10 ? Math.min(seedBow, minimumBow * 1.8) : seedBow,
-    );
+    const sourceBowCapFactor: number = Math.abs(width) < 10
+      ? 1.8
+      : Math.abs(width) < 20 ? 1.6 : 1.8;
+    minimumBow = Math.max(minimumBow, Math.min(seedBow, minimumBow * sourceBowCapFactor));
   }
   if (context.isCrossStaff) {
     // A steep cross-staff route needs enough independent bow to read as a
@@ -872,6 +896,7 @@ function isForbiddenObstacle(obstacle: SlurObstacle): boolean {
   switch (obstacle.type) {
     case "notehead":
     case "beam":
+    case "ledger-line":
     case "accidental":
     case "tie":
     case "tuplet":
@@ -891,7 +916,7 @@ function isInsideEndpointAttachmentZone(
   point: PointF2D,
   clearance: number,
 ): boolean {
-  if (obstacle.type === "accidental") {
+  if (obstacle.type === "accidental" || obstacle.type === "ledger-line") {
     return false;
   }
   if (obstacle.endpoint === "start" || obstacle.endpoint === "both") {
@@ -1137,6 +1162,44 @@ function scoreCandidate(
     candidate.endAnchor.penalties.stemRelationship +
     acuteNoteheadPenalty(candidate.startAnchor) +
     acuteNoteheadPenalty(candidate.endAnchor);
+  const semanticEndpointPenalty: (anchor: SlurAnchorCandidate) => number =
+    (anchor): number => {
+      const endpoint: SlurEndpointContext = anchor.side === "start" ? context.start : context.end;
+      let penalty: number = 0;
+      const phraseWidth: number = Math.abs(
+        context.end.seedAnchor.x - context.start.seedAnchor.x,
+      );
+      if (anchor.type === "stem-tip" && endpoint.chordSize > 1 && phraseWidth >= 10) {
+        penalty += 0.85;
+      }
+      if (anchor.type === "beam-side" && !context.sharedEndpointBeam && !context.isCrossStaff) {
+        penalty += 0.45;
+      }
+      if (
+        anchor.side === "end" &&
+        context.isCrossStaff &&
+        context.isCrossSystem &&
+        context.start.systemBoundary &&
+        (anchor.type === "beam-side" || anchor.type === "stem-tip")
+      ) {
+        // A continuation returning on a new system cannot reconnect visually
+        // to the originating beam. Prefer the destination notehead so a local
+        // beam or stem does not pull the returning segment into a steep hook.
+        penalty += 5;
+      }
+      const hasEndpointLedger: boolean = context.obstacles.some(
+        (obstacle): boolean => obstacle.type === "ledger-line" &&
+          (obstacle.endpoint === anchor.side || obstacle.endpoint === "both"),
+      );
+      if (hasEndpointLedger) {
+        penalty += ["notehead", "notehead-center"].includes(anchor.type) ? 5
+          : anchor.type === "outer-head" ? 2
+            : 0;
+      }
+      return penalty;
+    };
+  const semanticAttachment: number =
+    semanticEndpointPenalty(candidate.startAnchor) + semanticEndpointPenalty(candidate.endAnchor);
   const articulation: number =
     candidate.startAnchor.penalties.articulationRelationship +
     candidate.endAnchor.penalties.articulationRelationship;
@@ -1163,7 +1226,7 @@ function scoreCandidate(
     collision: evaluation.forbiddenObstacleIntersections,
     clearance,
     excessiveClearance: evaluation.excessiveClearance,
-    anchorDisplacement,
+    anchorDisplacement: anchorDisplacement + semanticAttachment,
     tangent,
     slope,
     curvature,
