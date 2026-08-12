@@ -68,6 +68,12 @@ describe("MusicXML harmony arrangements", (): void => {
       .to.equal("C#6/9");
     expect(sourceChords[16].calculateUpperHarmonyText(sourceChords[16].Components[0], 0, key))
       .to.equal("Em6/9");
+    expect(sourceChords[19].calculateUpperHarmonyText(sourceChords[19].Components[0], 0, key))
+      .to.equal("Csus2/4");
+    expect(sourceChords[20].calculateUpperHarmonyText(sourceChords[20].Components[0], 0, key))
+      .to.equal("Dbsus2/4");
+    expect(sourceChords[19].calculateUpperHarmonyText(sourceChords[19].Components[0], 2, key))
+      .to.equal("Dsus2/4");
   });
 
   it("lays out canonical polychord, slash, custom, and abbreviated geometry inside aggregate bounds", async (): Promise<void> => {
@@ -141,6 +147,29 @@ describe("MusicXML harmony arrangements", (): void => {
       expect(runs[sixIndex + 2].text).to.equal("9");
       expect(runs[sixIndex].baselineShift).to.be.lessThan(runs[sixIndex + 1].baselineShift);
       expect(runs[sixIndex + 1].baselineShift).to.be.lessThan(runs[sixIndex + 2].baselineShift);
+    }
+
+    const suspendedChords: GraphicalChordSymbolContainer[] = systems[5];
+    for (const chord of suspendedChords) {
+      const runs: LabelTextRun[] = chord.GraphicalLabels[0].Label.textLines[0].runs;
+      const susIndex: number = runs.findIndex((run) => run.text.toLowerCase() === "sus");
+      expect(susIndex).to.be.greaterThan(-1);
+      expect(runs[susIndex + 1].text).to.equal("2");
+      expect(runs[susIndex + 2].text).to.equal("\u2044");
+      expect(runs[susIndex + 3].text).to.equal("4");
+      expect(runs[susIndex + 1].baselineShift).to.be.lessThan(runs[susIndex + 2].baselineShift);
+      expect(runs[susIndex + 2].baselineShift).to.be.lessThan(runs[susIndex + 3].baselineShift);
+
+      const runTop: (run: LabelTextRun) => number = (run: LabelTextRun): number =>
+        (run.baselineShift ?? 0) - 1;
+      const runBottom: (run: LabelTextRun) => number = (run: LabelTextRun): number =>
+        (run.baselineShift ?? 0) + (run.fontScale ?? 1) - 1;
+      const susCenter: number = (runTop(runs[susIndex]) + runBottom(runs[susIndex])) / 2;
+      const diagonalRuns: LabelTextRun[] = runs.slice(susIndex + 1, susIndex + 4);
+      const diagonalCenter: number = (
+        Math.min(...diagonalRuns.map(runTop)) + Math.max(...diagonalRuns.map(runBottom))
+      ) / 2;
+      expect(diagonalCenter).to.be.closeTo(susCenter, 0.0001);
     }
 
     const referenceSlash: GraphicalChordSymbolContainer = systems[4][0];

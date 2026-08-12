@@ -47,6 +47,12 @@ export const OSMD_CHORD_MAJOR_SEVENTH_SYMBOL: string = "△";
 
 const CHORD_SUPERSCRIPT_FONT_SCALE: number = 0.72;
 const CHORD_SUPERSCRIPT_BASELINE_SHIFT: number = -0.35;
+const CHORD_DIAGONAL_UPPER_FONT_SCALE: number = 0.62;
+const CHORD_DIAGONAL_UPPER_BASELINE_SHIFT: number = -0.52;
+const CHORD_DIAGONAL_SLASH_FONT_SCALE: number = 0.66;
+const CHORD_DIAGONAL_SLASH_BASELINE_SHIFT: number = -0.25;
+const CHORD_DIAGONAL_LOWER_FONT_SCALE: number = 0.62;
+const CHORD_DIAGONAL_LOWER_BASELINE_SHIFT: number = 0.02;
 
 export const SCORE_TEXT_FONT_AUDIT: ScoreTextFontAudit = Object.freeze({
     defaultScoreText: OSMD_DEFAULT_TEXT_FONT_FAMILY,
@@ -282,41 +288,81 @@ function splitChordSymbolSegments(text: string): ChordLayoutSegment[] {
         }
         const superscriptText: string = suffixText.slice(baselinePrefix.length);
         if (superscriptText) {
-            const sixNineMatch: RegExpMatchArray = superscriptText.match(/^(.*?)6\/9(.*)$/);
-            if (sixNineMatch) {
-                if (sixNineMatch[1]) {
-                    segments.push({
-                        text: sixNineMatch[1],
-                        fontScale: CHORD_SUPERSCRIPT_FONT_SCALE,
-                        baselineShift: CHORD_SUPERSCRIPT_BASELINE_SHIFT,
-                    });
-                }
-                // 6/9 is a compact diagonal extension, not a stacked fraction and
-                // not an altered-bass separator. Academico has no dedicated SMuFL
-                // glyph for the construction, so use its typographic fraction slash.
-                segments.push({ text: "6", fontScale: 0.62, baselineShift: -0.52 });
-                segments.push({ text: "\u2044", fontScale: 0.66, baselineShift: -0.25 });
-                segments.push({ text: "9", fontScale: 0.62, baselineShift: 0.02 });
-                if (sixNineMatch[2]) {
-                    segments.push({
-                        text: sixNineMatch[2],
-                        fontScale: CHORD_SUPERSCRIPT_FONT_SCALE,
-                        baselineShift: CHORD_SUPERSCRIPT_BASELINE_SHIFT,
-                    });
-                }
-            } else {
-                segments.push({
-                    text: superscriptText,
-                    fontScale: CHORD_SUPERSCRIPT_FONT_SCALE,
-                    baselineShift: CHORD_SUPERSCRIPT_BASELINE_SHIFT,
-                });
-            }
+            appendChordSuperscriptSegments(segments, superscriptText);
         }
     }
     if (bassText) {
         segments.push({ text: bassText });
     }
     return segments;
+}
+
+function appendChordSuperscriptSegments(segments: ChordLayoutSegment[], text: string): void {
+    const suspendedMatch: RegExpMatchArray = text.match(/^(.*?)sus2\/4(.*)$/i);
+    if (suspendedMatch) {
+        appendSuperscriptSegment(segments, suspendedMatch[1]);
+        appendSuperscriptSegment(segments, text.slice(suspendedMatch[1].length, suspendedMatch[1].length + 3));
+
+        // Centre the complete diagonal 2/4 group on the adjacent "sus" run.
+        // This offset is derived from the actual scaled-run bounds, rather than
+        // tuning each numeral independently.
+        const superscriptCenter: number =
+            CHORD_SUPERSCRIPT_BASELINE_SHIFT + CHORD_SUPERSCRIPT_FONT_SCALE / 2;
+        const diagonalCenter: number = (
+            CHORD_DIAGONAL_UPPER_BASELINE_SHIFT +
+            CHORD_DIAGONAL_LOWER_BASELINE_SHIFT + CHORD_DIAGONAL_LOWER_FONT_SCALE
+        ) / 2;
+        appendDiagonalNumeralSegments(segments, "2", "4", superscriptCenter - diagonalCenter);
+        appendSuperscriptSegment(segments, suspendedMatch[2]);
+        return;
+    }
+
+    const sixNineMatch: RegExpMatchArray = text.match(/^(.*?)6\/9(.*)$/);
+    if (sixNineMatch) {
+        appendSuperscriptSegment(segments, sixNineMatch[1]);
+        appendDiagonalNumeralSegments(segments, "6", "9");
+        appendSuperscriptSegment(segments, sixNineMatch[2]);
+        return;
+    }
+
+    appendSuperscriptSegment(segments, text);
+}
+
+function appendSuperscriptSegment(segments: ChordLayoutSegment[], text: string): void {
+    if (!text) {
+        return;
+    }
+    segments.push({
+        text,
+        fontScale: CHORD_SUPERSCRIPT_FONT_SCALE,
+        baselineShift: CHORD_SUPERSCRIPT_BASELINE_SHIFT,
+    });
+}
+
+function appendDiagonalNumeralSegments(
+    segments: ChordLayoutSegment[],
+    upper: string,
+    lower: string,
+    baselineOffset: number = 0,
+): void {
+    // These are compact diagonal extensions, not stacked fractions or
+    // altered-bass separators. Academico has no dedicated SMuFL construction,
+    // so use its typographic fraction slash between independently placed runs.
+    segments.push({
+        text: upper,
+        fontScale: CHORD_DIAGONAL_UPPER_FONT_SCALE,
+        baselineShift: CHORD_DIAGONAL_UPPER_BASELINE_SHIFT + baselineOffset,
+    });
+    segments.push({
+        text: "\u2044",
+        fontScale: CHORD_DIAGONAL_SLASH_FONT_SCALE,
+        baselineShift: CHORD_DIAGONAL_SLASH_BASELINE_SHIFT + baselineOffset,
+    });
+    segments.push({
+        text: lower,
+        fontScale: CHORD_DIAGONAL_LOWER_FONT_SCALE,
+        baselineShift: CHORD_DIAGONAL_LOWER_BASELINE_SHIFT + baselineOffset,
+    });
 }
 
 function matchChordBaselineQualityPrefix(text: string): string {
