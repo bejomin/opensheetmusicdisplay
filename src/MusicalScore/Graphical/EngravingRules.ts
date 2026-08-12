@@ -1317,6 +1317,10 @@ export class EngravingRules {
         this.addChordName("11sus2", "suspendedsecond", ["11"], [], []);
         this.addChordName("13sus2", "dominant13th", ["2"], [], ["3"]);
         this.addChordName("13sus2", "suspendedsecond", ["13"], [], []);
+        // MusicXML can describe the same doubly suspended chord from either
+        // suspension. Normalize both forms to the compact conventional label.
+        this.addChordName("sus2/4", "suspendedfourth", ["2"], [], []);
+        this.addChordName("sus2/4", "suspendedsecond", ["4"], [], []);
         this.addChordName("m△9", "majorminor", ["9"], [], []);
         this.addChordName("m△11", "majorminor", ["11"], [], []);
         this.addChordName("m△13", "majorminor", ["13"], [], []);
