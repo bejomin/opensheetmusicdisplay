@@ -48,6 +48,7 @@ interface MeasureProfile {
 interface ProfileColumn {
   basePositionPx: number;
   contexts: VF.TickContext[];
+  harmonies: ProfileHarmony[];
   intrinsicHardWidthPx: number;
   notationLeftExtentPx: number;
   notationRightExtentPx: number;
@@ -57,6 +58,13 @@ interface ProfileColumn {
   terminalBarlineInwardExtentPx?: number;
   rhythmicWeight: number;
   timestamp: number;
+}
+
+interface ProfileHarmony extends HarmonyFootprint {
+  anchorOffsetPx: number;
+  container: GraphicalChordSymbolContainer;
+  placement: number;
+  staff: Staff;
 }
 
 interface CandidateColumn extends ProfileColumn {
@@ -92,10 +100,6 @@ interface CandidateHarmony {
 interface HarmonyFootprint {
   leftOffsetPx: number;
   rightOffsetPx: number;
-}
-
-interface MeasureHarmonyEvent extends HarmonyFootprint {
-  timestamp: number;
 }
 
 interface CandidateSolution {
@@ -469,6 +473,11 @@ export class VexFlowSystemSpacingPlanner implements IHorizontalSystemSpacingPlan
     for (const verticalMeasures of this.graphicalMusicSheet.MeasureList ?? []) {
       for (const measure of verticalMeasures ?? []) {
         (measure as VexFlowMeasure)?.setHorizontalSpacingTargetPositions?.(undefined);
+        for (const staffEntry of measure?.staffEntries ?? []) {
+          for (const container of staffEntry.graphicalChordContainers ?? []) {
+            container.HorizontalSpacingTargetX = undefined;
+          }
+        }
       }
     }
     this.diagnostics = emptyDiagnostics();
@@ -700,6 +709,12 @@ function installHorizontalSpacingTargets(
       finalPositionsPx[nodeIndex] - measureStartX - beginInstructionsWidthPx;
     for (const context of column.contexts) {
       targetsByMeasure[inputIndex].set(context.getTickID(), localTargetX);
+    }
+    const harmonyTargetX: number =
+      (finalPositionsPx[nodeIndex] - measureStartX) / unitInPixels;
+    for (const harmony of column.harmonies) {
+      harmony.container.HorizontalSpacingTargetX =
+        harmonyTargetX + harmony.anchorOffsetPx / unitInPixels;
     }
   }
 
@@ -1074,6 +1089,11 @@ function collectMeasureProfiles(
       sourceMeasure,
       columns[columns.length - 1]?.timestamp,
     );
+    attachUnanchoredHarmonyColumns(
+      columns,
+      graphicalMeasures,
+      rhythmicEndTimestamp,
+    );
     const rhythmicWeight: number = measureRhythmicWeight(sourceMeasure);
     const leadingRhythmicWeight: number = assignTemporalRhythmicWeights(
       columns,
@@ -1094,10 +1114,7 @@ function collectMeasureProfiles(
     const notationMinimumRequiredWidthPx: number = lastColumn
       ? lastColumn.basePositionPx + lastColumn.notationRightExtentPx
       : 0;
-    const minimumRequiredWidthPx: number = Math.max(
-      notationMinimumRequiredWidthPx,
-      unanchoredHarmonyMinimumWidthPx(graphicalMeasures, rhythmicEndTimestamp, rules),
-    );
+    const minimumRequiredWidthPx: number = notationMinimumRequiredWidthPx;
     const terminalHasVisibleRest: boolean = lastColumn?.hasVisibleRest === true;
     const terminalBarlineInwardExtentPx: number = terminalHasVisibleRest
       ? endBarlineInwardExtentPx(sourceMeasure.endingBarStyleEnum)
@@ -1159,139 +1176,6 @@ function endBarlineInwardExtentPx(line: SystemLinesEnum): number {
   return Math.max(0, -(metrics?.xMin ?? 0));
 }
 
-/**
- * Retain the legacy proportional width floor only for harmony that cannot be
- * tied to a rhythmic VexFlow column. Rhythmically anchored chord symbols are
- * handled by collectSystemHarmonyConstraints(), which applies their actual
- * local footprints without turning a late chord's terminal overhang into a
- * whole-measure width multiplier.
- */
-function unanchoredHarmonyMinimumWidthPx(
-  graphicalMeasures: GraphicalMeasure[],
-  measureEnd: number,
-  rules: EngravingRules,
-): number {
-  if (!rules.RenderChordSymbols || !Number.isFinite(measureEnd) || measureEnd <= 0) {
-    return 0;
-  }
-
-  let minimumWidthPx: number = 0;
-  for (const measure of graphicalMeasures) {
-    const tracks: Map<number, Map<number, HarmonyFootprint>> =
-      new Map<number, Map<number, HarmonyFootprint>>();
-    for (const staffEntry of measure.staffEntries) {
-      const timestamp: number =
-        staffEntry.relInMeasureTimestamp?.RealValue ??
-        staffEntry.sourceStaffEntry?.Timestamp?.RealValue ??
-        0;
-      const normalizedTimestamp: number = Math.max(
-        0,
-        Math.min(1, timestamp / measureEnd),
-      );
-      for (const container of (staffEntry.graphicalChordContainers ?? []) as GraphicalChordSymbolContainer[]) {
-        if (
-          container?.PositionAndShape.Parent === staffEntry.PositionAndShape &&
-          findStaffEntryTickContext(staffEntry)
-        ) {
-          continue;
-        }
-        const placement: number = container.GetChordSymbolContainer.Placement;
-        const track: Map<number, HarmonyFootprint> =
-          tracks.get(placement) ??
-          new Map<number, HarmonyFootprint>();
-        const current: HarmonyFootprint =
-          track.get(normalizedTimestamp);
-        const leftOffsetPx: number =
-          (
-            container.PositionAndShape.RelativePosition.x +
-            container.PositionAndShape.BorderMarginLeft
-          ) * unitInPixels;
-        const rightOffsetPx: number =
-          (
-            container.PositionAndShape.RelativePosition.x +
-            container.PositionAndShape.BorderMarginRight
-          ) * unitInPixels;
-        if (normalizedTimestamp < 1) {
-          // Direction-only harmony is positioned proportionally between the
-          // first rhythmic entry and the end instruction area after final
-          // formatting. Model that same interpolation here. The previous
-          // origin-based estimate could leave a late slash-bass contour almost
-          // touching the barline (and a number centred on it).
-          const beginInstructionsWidth: number = measure.beginInstructionsWidth ?? 0;
-          const endInstructionsWidth: number = measure.endInstructionsWidth ?? 0;
-          const firstEntryX: number = measure.staffEntries[0]?.PositionAndShape.RelativePosition.x ??
-            beginInstructionsWidth;
-          const requiredTotalWidth: number = firstEntryX +
-            (
-              container.PositionAndShape.BorderMarginRight +
-              harmonyBarlineClearance(rules) -
-              endInstructionsWidth * normalizedTimestamp
-            ) /
-            (1 - normalizedTimestamp);
-          minimumWidthPx = Math.max(
-            minimumWidthPx,
-            Math.max(
-              0,
-              requiredTotalWidth - beginInstructionsWidth - endInstructionsWidth,
-            ) * unitInPixels,
-          );
-        }
-        track.set(normalizedTimestamp, {
-          leftOffsetPx: current
-            ? Math.min(current.leftOffsetPx, leftOffsetPx)
-            : leftOffsetPx,
-          rightOffsetPx: current
-            ? Math.max(current.rightOffsetPx, rightOffsetPx)
-            : rightOffsetPx,
-        });
-        tracks.set(placement, track);
-      }
-    }
-    tracks.forEach(
-      (track: Map<number, HarmonyFootprint>): void => {
-        const events: MeasureHarmonyEvent[] = Array.from(track.entries())
-          .map(([timestamp, footprint]) => ({ timestamp, ...footprint }))
-          .sort((left, right) => left.timestamp - right.timestamp);
-        if (events.length === 0) {
-          return;
-        }
-        const first: MeasureHarmonyEvent = events[0];
-        if (first.timestamp > 0) {
-          minimumWidthPx = Math.max(
-            minimumWidthPx,
-            Math.max(0, -first.leftOffsetPx) / first.timestamp,
-          );
-        }
-        for (let index: number = 1; index < events.length; index++) {
-          const previous: MeasureHarmonyEvent = events[index - 1];
-          const current: MeasureHarmonyEvent = events[index];
-          const elapsed: number = current.timestamp - previous.timestamp;
-          if (elapsed <= 0) {
-            continue;
-          }
-          minimumWidthPx = Math.max(
-            minimumWidthPx,
-            Math.max(
-              0,
-              previous.rightOffsetPx -
-              current.leftOffsetPx +
-              rules.ChordSymbolXSpacing * unitInPixels,
-            ) / elapsed,
-          );
-        }
-        const last: MeasureHarmonyEvent = events[events.length - 1];
-        if (last.timestamp < 1) {
-          minimumWidthPx = Math.max(
-            minimumWidthPx,
-            Math.max(0, last.rightOffsetPx) / (1 - last.timestamp),
-          );
-        }
-      },
-    );
-  }
-  return minimumWidthPx;
-}
-
 function groupContextsByTick(
   contextTimestamps: Map<VF.TickContext, number>,
   visibleRestContexts: Set<VF.TickContext>,
@@ -1311,6 +1195,7 @@ function groupContextsByTick(
       return {
         basePositionPx: Math.min(...group.map((context: VF.TickContext): number => context.getX())),
         contexts: group,
+        harmonies: [],
         hasVisibleRest: group.some(
           (context: VF.TickContext): boolean => visibleRestContexts.has(context),
         ),
@@ -1339,6 +1224,121 @@ function groupContextsByTick(
         left.timestamp - right.timestamp ||
         left.basePositionPx - right.basePositionPx,
     );
+}
+
+/**
+ * Give harmony-only timestamps a real column in the selected-system spacing
+ * graph. A visible accompaniment often supplies the same column through its
+ * notes; when it is hidden, the synthetic column preserves that rhythmic x
+ * anchor and lets the harmony footprints participate in minimum-width and
+ * line-break decisions.
+ */
+function attachUnanchoredHarmonyColumns(
+  columns: ProfileColumn[],
+  graphicalMeasures: GraphicalMeasure[],
+  measureEnd: number,
+): void {
+  if (!Number.isFinite(measureEnd) || measureEnd <= 0) {
+    return;
+  }
+  for (const measure of graphicalMeasures) {
+    const baseVariableWidthPx: number = Number.isFinite(measure.minimumStaffEntriesWidth)
+      ? Math.max(0, measure.minimumStaffEntriesWidth * unitInPixels)
+      : 0;
+    for (const staffEntry of measure.staffEntries) {
+      const timestamp: number =
+        staffEntry.relInMeasureTimestamp?.RealValue ??
+        staffEntry.sourceStaffEntry?.Timestamp?.RealValue ??
+        0;
+      for (const container of (staffEntry.graphicalChordContainers ?? []) as GraphicalChordSymbolContainer[]) {
+        if (
+          container?.PositionAndShape.Parent === staffEntry.PositionAndShape &&
+          findStaffEntryTickContext(staffEntry)
+        ) {
+          continue;
+        }
+        let column: ProfileColumn = columns.find(
+          (candidate: ProfileColumn): boolean =>
+            Math.abs(candidate.timestamp - timestamp) <= 0.000001,
+        );
+        if (!column) {
+          const proportion: number = Math.max(
+            0,
+            Math.min(1, timestamp / measureEnd),
+          );
+          column = {
+            // minimumStaffEntriesWidth is recalculated from the unmodified
+            // VexFlow voices on every pass. Using it here avoids feeding the
+            // previous selected-system width back into a later rebuild.
+            basePositionPx: baseVariableWidthPx * proportion,
+            contexts: [],
+            harmonies: [],
+            hasVisibleRest: false,
+            intrinsicHardWidthPx: 0,
+            notationLeftExtentPx: 0,
+            notationRightExtentPx: 0,
+            rhythmicWeight: 0,
+            timestamp,
+          };
+          columns.push(column);
+        }
+        const anchorOffsetPx: number = harmonyColumnAnchorOffsetPx(
+          column,
+          graphicalMeasures,
+          staffEntry,
+          timestamp,
+        );
+        column.harmonies.push({
+          anchorOffsetPx,
+          container,
+          leftOffsetPx:
+            anchorOffsetPx +
+            container.PositionAndShape.BorderMarginLeft * unitInPixels,
+          placement: container.GetChordSymbolContainer.Placement,
+          rightOffsetPx:
+            anchorOffsetPx +
+            container.PositionAndShape.BorderMarginRight * unitInPixels,
+          staff: measure.ParentStaff,
+        });
+      }
+    }
+  }
+  columns.sort(
+    (left: ProfileColumn, right: ProfileColumn): number =>
+      left.timestamp - right.timestamp ||
+      left.basePositionPx - right.basePositionPx,
+  );
+}
+
+/** Offset from a shared VexFlow timestamp to the rendered notehead column on
+ * another visible staff. This preserves piano alignment without requiring the
+ * harmony-only staff entry to own a note or TickContext. */
+function harmonyColumnAnchorOffsetPx(
+  column: ProfileColumn,
+  graphicalMeasures: GraphicalMeasure[],
+  harmonyStaffEntry: GraphicalStaffEntry,
+  timestamp: number,
+): number {
+  for (const measure of graphicalMeasures) {
+    for (const staffEntry of measure.staffEntries) {
+      if (
+        staffEntry === harmonyStaffEntry ||
+        Math.abs(staffEntry.relInMeasureTimestamp.RealValue - timestamp) > 0.000001
+      ) {
+        continue;
+      }
+      const context: VF.TickContext = findStaffEntryTickContext(staffEntry);
+      if (!context || !column.contexts.includes(context)) {
+        continue;
+      }
+      return (
+        staffEntry.PositionAndShape.RelativePosition.x * unitInPixels -
+        measure.beginInstructionsWidth * unitInPixels -
+        context.getX()
+      );
+    }
+  }
+  return 0;
 }
 
 function collectSystemNotationConstraints(nodes: CandidateNode[]): HorizontalSpacingConstraint[] {
@@ -1435,7 +1435,7 @@ function collectSystemLyricConstraints(
               vfStaveNote?: VF.Note;
             }
           )?.vfStaveNote;
-          const context: VF.TickContext = note?.getTickContext?.();
+          const context: VF.TickContext = tryGetTickContext(note);
           const columnIndex: number = contextToColumn.get(context);
           if (!Number.isInteger(columnIndex)) {
             continue;
@@ -1623,9 +1623,8 @@ function collectSystemHarmonyConstraints(
             !container ||
             container.PositionAndShape.Parent !== staffEntry.PositionAndShape
           ) {
-            // Whole-rest and direction-only harmonies retain their existing
-            // proportional positioning because they do not own a rhythmic
-            // VexFlow column.
+            // Whole-rest and direction-only harmony is attached to the
+            // measure profile's real or synthetic timestamp column below.
             continue;
           }
           const anchorOffsetPx: number =
@@ -1655,6 +1654,30 @@ function collectSystemHarmonyConstraints(
           byPlacement.set(candidate.placement, track);
           harmonyByStaffAndPlacement.set(candidate.staff, byPlacement);
         }
+      }
+    }
+    for (let columnIndex: number = 0; columnIndex < nodes.length; columnIndex++) {
+      const column: CandidateColumn = nodes[columnIndex].column;
+      if (!column || column.inputIndex !== inputIndex) {
+        continue;
+      }
+      for (const harmony of column.harmonies) {
+        const candidate: CandidateHarmony = {
+          columnIndex,
+          leftOffsetPx: harmony.leftOffsetPx,
+          measureEndColumnIndex,
+          placement: harmony.placement,
+          rightOffsetPx: harmony.rightOffsetPx,
+          staff: harmony.staff,
+        };
+        const byPlacement: Map<number, CandidateHarmony[]> =
+          harmonyByStaffAndPlacement.get(candidate.staff) ??
+          new Map<number, CandidateHarmony[]>();
+        const track: CandidateHarmony[] =
+          byPlacement.get(candidate.placement) ?? [];
+        track.push(candidate);
+        byPlacement.set(candidate.placement, track);
+        harmonyByStaffAndPlacement.set(candidate.staff, byPlacement);
       }
     }
   }
@@ -1779,12 +1802,27 @@ function findStaffEntryTickContext(staffEntry: GraphicalStaffEntry): VF.TickCont
         vfStaveNote?: VF.Note;
       }
     ).vfStaveNote;
-    const context: VF.TickContext = note?.getTickContext?.();
+    const context: VF.TickContext = tryGetTickContext(note);
     if (context) {
       return context;
     }
   }
   return undefined;
+}
+
+function tryGetTickContext(note: VF.Note): VF.TickContext {
+  if (!note?.getTickContext) {
+    return undefined;
+  }
+  try {
+    return note.getTickContext();
+  } catch (error: unknown) {
+    if ((error as { code?: string })?.code !== "NoTickContext") {
+      throw error;
+    }
+    // Hidden or freshly rebuilt tickables can legitimately have no context.
+    return undefined;
+  }
 }
 
 function lyricPairConstraint(
@@ -1941,7 +1979,7 @@ function collectCurrentContexts(graphicalMusicSheet: GraphicalMusicSheet): Set<V
               vfStaveNote?: VF.Note;
             }
           ).vfStaveNote;
-          const context: VF.TickContext = note?.getTickContext?.();
+          const context: VF.TickContext = tryGetTickContext(note);
           if (context) {
             contexts.add(context);
           }
@@ -1967,7 +2005,7 @@ function collectContextTimestamps(
             vfStaveNote?: VF.Note;
           }
         ).vfStaveNote;
-        const context: VF.TickContext = note?.getTickContext?.();
+        const context: VF.TickContext = tryGetTickContext(note);
         if (context) {
           const timestamp: number =
             staffEntry.relInMeasureTimestamp?.RealValue ??
@@ -2007,7 +2045,7 @@ function collectVisibleRestContexts(
             vfStaveNote?: VF.Note;
           }
         ).vfStaveNote;
-        const context: VF.TickContext = note?.getTickContext?.();
+        const context: VF.TickContext = tryGetTickContext(note);
         if (context) {
           contexts.add(context);
         }

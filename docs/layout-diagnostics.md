@@ -25,6 +25,16 @@ Open `build/layout-corpus/index.html`. The gallery includes:
 
 Only objective faults fail the command: load/render errors, missing SVG, non-finite geometry, required-font failures, and first/second-render drift. Heuristic collision findings remain review badges.
 
+## Horizontal-spacing columns
+
+`HorizontalSpacingDiagnostics` records the selected system's rhythmic columns
+and the hard constraints applied between them. A rhythmic column with an empty
+`tickIds` array is intentional: it is a synthetic timestamp used for notation
+such as harmony in a whole-rest voice when no visible note supplies a VexFlow
+tick context. These columns let chord footprints influence measure width and
+line breaking while keeping the chord on its musical timestamp when an
+accompaniment staff is hidden.
+
 ## Focused and comparison runs
 
 Run `node scripts/render-layout-corpus.mjs --help` for all options. The harness accepts:

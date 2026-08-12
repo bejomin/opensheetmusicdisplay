@@ -1329,7 +1329,14 @@ export abstract class MusicSheetCalculator {
             for (const staffEntry of measure.staffEntries) {
                 for (const graphicalChordContainer of staffEntry.graphicalChordContainers ?? []) {
                     const gps: BoundingBox = graphicalChordContainer.PositionAndShape;
-                    if (staffEntry.graphicalVoiceEntries.length === 0 && staffEntry.relInMeasureTimestamp.RealValue > 0) {
+                    const horizontalSpacingTargetX: number | undefined =
+                        graphicalChordContainer.HorizontalSpacingTargetX;
+                    const hasHorizontalSpacingTarget: boolean = Number.isFinite(horizontalSpacingTargetX);
+                    if (
+                        hasHorizontalSpacingTarget ||
+                        (staffEntry.graphicalVoiceEntries.length === 0 &&
+                            staffEntry.relInMeasureTimestamp.RealValue > 0)
+                    ) {
                         let firstNoteStartX: number = 0;
                         if (measure.staffEntries[0].relInMeasureTimestamp.RealValue === 0) {
                             firstNoteStartX = measure.staffEntries[0].PositionAndShape.RelativePosition.x;
@@ -1337,11 +1344,12 @@ export abstract class MusicSheetCalculator {
                         const measureEndX: number = measure.PositionAndShape.Size.width - measure.endInstructionsWidth;
                         const proportionInMeasure: number = staffEntry.relInMeasureTimestamp.RealValue /
                             measure.parentSourceMeasure.Duration.RealValue;
-                        let newStartX: number = firstNoteStartX +
-                            (measureEndX - firstNoteStartX) * proportionInMeasure;
+                        let newStartX: number = hasHorizontalSpacingTarget
+                            ? horizontalSpacingTargetX as number
+                            : firstNoteStartX + (measureEndX - firstNoteStartX) * proportionInMeasure;
                         const newParent: BoundingBox = measure.staffEntries[0].PositionAndShape.Parent;
                         gps.Parent = newParent;
-                        if (previousChordContainer) {
+                        if (!hasHorizontalSpacingTarget && previousChordContainer) {
                             const previousBounds: BoundingBox = previousChordContainer.PositionAndShape;
                             previousBounds.calculateAbsolutePosition();
                             newParent.calculateAbsolutePosition();

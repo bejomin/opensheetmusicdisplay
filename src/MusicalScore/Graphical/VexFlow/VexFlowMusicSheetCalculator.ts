@@ -800,13 +800,21 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
       }
     }
 
-    // Lyric spacing is solved before this residual pass. Keep only chord
-    // symbols here until they are migrated to shared-column constraints.
+    // Rhythmically anchored chord symbols retain this compatibility pass.
+    // Harmony without a note-bearing staff entry is now represented by the
+    // shared-column constraint graph and must not feed its previous solved x
+    // position back into the next render's measure-width calculation.
     for (const staffEntry of staffEntries) {
-      if (staffEntry.graphicalChordContainers.length > 0 && this.rules.RenderChordSymbols) {
+      const anchoredChordContainers: GraphicalChordSymbolContainer[] =
+        staffEntry.graphicalChordContainers.filter(
+          (container: GraphicalChordSymbolContainer): boolean =>
+            container.PositionAndShape.Parent === staffEntry.PositionAndShape &&
+            staffEntry.graphicalVoiceEntries.length > 0,
+        );
+      if (anchoredChordContainers.length > 0 && this.rules.RenderChordSymbols) {
         newElongationFactorForMeasureWidth =
           this.calculateElongationFactor(
-            staffEntry.graphicalChordContainers,
+            anchoredChordContainers,
             staffEntry,
             lastChordEntryDict,
             oldMinimumStaffEntriesWidth,

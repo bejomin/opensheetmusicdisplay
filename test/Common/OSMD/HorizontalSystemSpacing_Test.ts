@@ -386,6 +386,63 @@ describe("Horizontal system spacing", (): void => {
     );
   });
 
+  it("keeps direction-only harmony on one row when its rhythmic accompaniment is hidden", async (): Promise<void> => {
+    const osmd: OpenSheetMusicDisplay = createOsmd();
+    await osmd.load(harmonyOnlyVoiceWithPianoScore());
+    osmd.Sheet.MeasureWidthFactor = 0.35;
+
+    osmd.render();
+    expectClearHarmonyRow(harmonyMeasureGeometry(osmd, 1), 0, "piano visible");
+    const visibleColumns: VexFlowHorizontalSpacingColumnDiagnostics[] =
+      getDiagnostics(osmd).selectedSystems[0].columns.filter(
+        (column: VexFlowHorizontalSpacingColumnDiagnostics): boolean =>
+          column.kind === "rhythmic" && column.measureIndex === 1,
+      );
+    expect(visibleColumns).to.have.length(4);
+    expect(
+      visibleColumns.every(
+        (column: VexFlowHorizontalSpacingColumnDiagnostics): boolean =>
+          column.tickIds.length > 0,
+      ),
+    ).to.equal(true);
+
+    osmd.Sheet.Instruments[1].Visible = false;
+    osmd.updateGraphic();
+    osmd.render();
+    const withoutPiano: HarmonyMeasureGeometry = harmonyMeasureGeometry(osmd, 1);
+    expectClearHarmonyRow(withoutPiano, 0, "piano hidden");
+    const hiddenSystem: VexFlowHorizontalSpacingSystemDiagnostics =
+      getDiagnostics(osmd).selectedSystems[0];
+    expect(
+      hiddenSystem.columns.some(
+        (column: VexFlowHorizontalSpacingColumnDiagnostics): boolean =>
+          column.kind === "rhythmic" &&
+          column.measureIndex === 1 &&
+          column.tickIds.length === 0,
+      ),
+    ).to.equal(true);
+    expect(
+      hiddenSystem.resolvedConstraints.some(
+        (constraint: ResolvedHorizontalSpacingConstraint): boolean =>
+          constraint.reason === "harmony",
+      ),
+    ).to.equal(true);
+
+    osmd.render();
+    expectHarmonyGeometryClose(
+      harmonyMeasureGeometry(osmd, 1),
+      withoutPiano,
+    );
+
+    osmd.Sheet.Instruments[1].Visible = true;
+    osmd.updateGraphic();
+    osmd.render();
+    const restoredPiano: HarmonyMeasureGeometry = harmonyMeasureGeometry(osmd, 1);
+    expectClearHarmonyRow(restoredPiano, 0, "piano restored");
+    osmd.render();
+    expectHarmonyGeometryClose(harmonyMeasureGeometry(osmd, 1), restoredPiano);
+  });
+
   it("keeps an ordinary full-measure rest on the original centering path", async (): Promise<void> => {
     const osmd: OpenSheetMusicDisplay = createOsmd();
     await osmd.load(wholeMeasureRestScore());
@@ -852,6 +909,99 @@ describe("Horizontal system spacing", (): void => {
 
 function createOsmd(): OpenSheetMusicDisplay {
   return TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+}
+
+interface HarmonyRect {
+  baseline: number;
+  left: number;
+  right: number;
+  text: string;
+}
+
+interface HarmonyMeasureGeometry {
+  measureRight: number;
+  rects: HarmonyRect[];
+}
+
+function harmonyMeasureGeometry(
+  osmd: OpenSheetMusicDisplay,
+  measureIndex: number,
+): HarmonyMeasureGeometry {
+  const voiceInstrument: any = osmd.Sheet.Instruments[0];
+  const measure: any = osmd.GraphicSheet.MeasureList[measureIndex].find(
+    (candidate: any): boolean =>
+      candidate?.isVisible?.() !== false &&
+      candidate?.ParentStaff?.ParentInstrument === voiceInstrument,
+  );
+  expect(measure).to.not.equal(undefined);
+  measure.PositionAndShape.calculateAbsolutePosition();
+  const rects: HarmonyRect[] = measure.staffEntries
+    .flatMap((staffEntry: any): unknown[] =>
+      staffEntry.graphicalChordContainers ?? [],
+    )
+    .map((container: any): HarmonyRect => {
+      const box: any = container.PositionAndShape;
+      box.calculateAbsolutePosition();
+      return {
+        baseline: box.AbsolutePosition.y,
+        left: box.AbsolutePosition.x + box.BorderLeft,
+        right: box.AbsolutePosition.x + box.BorderRight,
+        text: container.GraphicalLabels
+          .map((label: any): string => label.Label.text)
+          .join("|"),
+      };
+    })
+    .sort((left: HarmonyRect, right: HarmonyRect): number =>
+      left.left - right.left,
+    );
+  return {
+    measureRight:
+      measure.PositionAndShape.AbsolutePosition.x +
+      measure.PositionAndShape.Size.width,
+    rects,
+  };
+}
+
+function expectClearHarmonyRow(
+  geometry: HarmonyMeasureGeometry,
+  minimumSpacing: number,
+  label: string,
+): void {
+  expect(geometry.rects).to.have.length(4);
+  const baselines: number[] = geometry.rects.map(
+    (rect: HarmonyRect): number => rect.baseline,
+  );
+  expect(
+    Math.max(...baselines) - Math.min(...baselines),
+    `${label}: ${geometry.rects.map(
+      (rect: HarmonyRect): string =>
+        `${rect.text}@${rect.left.toFixed(2)}-${rect.right.toFixed(2)},y${rect.baseline.toFixed(2)}`,
+    ).join("; ")}`,
+  ).to.be.lessThan(0.01);
+  for (let index: number = 1; index < geometry.rects.length; index++) {
+    expect(
+      geometry.rects[index].left - geometry.rects[index - 1].right,
+      `${label}: ${geometry.rects[index - 1].text} to ${geometry.rects[index].text}`,
+    ).to.be.at.least(minimumSpacing - 0.01);
+  }
+  expect(
+    geometry.measureRight - geometry.rects[geometry.rects.length - 1].right,
+    `${label}: final harmony to barline clearance`,
+  ).to.be.at.least(minimumSpacing - 0.01);
+}
+
+function expectHarmonyGeometryClose(
+  actual: HarmonyMeasureGeometry,
+  expected: HarmonyMeasureGeometry,
+): void {
+  expect(actual.rects.map((rect: HarmonyRect): string => rect.text))
+    .to.deep.equal(expected.rects.map((rect: HarmonyRect): string => rect.text));
+  expect(actual.measureRight).to.be.closeTo(expected.measureRight, 0.001);
+  for (let index: number = 0; index < actual.rects.length; index++) {
+    expect(actual.rects[index].left).to.be.closeTo(expected.rects[index].left, 0.001);
+    expect(actual.rects[index].right).to.be.closeTo(expected.rects[index].right, 0.001);
+    expect(actual.rects[index].baseline).to.be.closeTo(expected.rects[index].baseline, 0.001);
+  }
 }
 
 function getDiagnostics(osmd: OpenSheetMusicDisplay): VexFlowHorizontalSpacingDiagnostics {
@@ -1505,6 +1655,98 @@ function extenderFollowerScore(): string {
         <duration>1</duration><type>eighth</type>
         <lyric number="1"><syllabic>single</syllabic><text>air</text></lyric>
       </note>
+    </measure>
+  </part>
+</score-partwise>`;
+}
+
+function harmonyOnlyVoiceWithPianoScore(): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list>
+    <score-part id="P1"><part-name>Voice</part-name></score-part>
+    <score-part id="P2"><part-name>Piano</part-name></score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>2</beats><beat-type>2</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef>
+      </attributes>
+      <note><rest measure="yes"/><duration>16</duration><voice>1</voice></note>
+      <backup><duration>16</duration></backup>
+      <harmony><root><root-step>C</root-step></root><kind>major</kind></harmony>
+      <forward><duration>8</duration></forward>
+      <harmony><root><root-step>C</root-step></root><kind text="7">dominant</kind></harmony>
+      <forward><duration>8</duration></forward>
+    </measure>
+    <measure number="2">
+      <note><rest measure="yes"/><duration>16</duration><voice>1</voice></note>
+      <backup><duration>16</duration></backup>
+      <harmony>
+        <root><root-step>F</root-step></root><kind>major</kind>
+        <bass><bass-step>A</bass-step></bass>
+      </harmony>
+      <forward><duration>4</duration></forward>
+      <harmony>
+        <root><root-step>A</root-step></root><kind text="7">dominant</kind>
+        <bass><bass-step>G</bass-step></bass>
+      </harmony>
+      <forward><duration>4</duration></forward>
+      <harmony>
+        <root><root-step>D</root-step></root><kind>major</kind>
+        <bass><bass-step>F</bass-step><bass-alter>1</bass-alter></bass>
+      </harmony>
+      <forward><duration>4</duration></forward>
+      <harmony>
+        <root><root-step>G</root-step></root><kind text="7">dominant</kind>
+        <bass><bass-step>F</bass-step></bass>
+      </harmony>
+      <forward><duration>4</duration></forward>
+    </measure>
+    <measure number="3">
+      <note><rest measure="yes"/><duration>16</duration><voice>1</voice></note>
+      <backup><duration>16</duration></backup>
+      <harmony>
+        <root><root-step>C</root-step></root><kind>major</kind>
+        <bass><bass-step>E</bass-step></bass>
+      </harmony>
+      <forward><duration>8</duration></forward>
+      <harmony>
+        <root><root-step>C</root-step></root><kind>major</kind>
+        <bass><bass-step>G</bass-step></bass>
+      </harmony>
+      <forward><duration>4</duration></forward>
+      <harmony><root><root-step>G</root-step></root><kind>major</kind></harmony>
+      <forward><duration>4</duration></forward>
+    </measure>
+  </part>
+  <part id="P2">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>2</beats><beat-type>2</beat-type></time>
+        <clef><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note><pitch><step>F</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note>
+      <note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note>
+      <note><pitch><step>A</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note>
+      <note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note>
+    </measure>
+    <measure number="2">
+      <note><pitch><step>F</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note>
+      <note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note>
+      <note><pitch><step>A</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note>
+      <note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note>
+    </measure>
+    <measure number="3">
+      <note><pitch><step>E</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note>
+      <note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>quarter</type></note>
+      <note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note>
     </measure>
   </part>
 </score-partwise>`;

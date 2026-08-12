@@ -41,6 +41,9 @@ export class GraphicalChordSymbolContainer extends GraphicalObject {
      * accumulating offsets across repeated layout passes.
      */
     private rhythmicAnchorOffsetX: number = 0;
+    /** Selected-system x target for harmony without its own VexFlow tick
+     * context. Stored in graphical-measure coordinates. */
+    private horizontalSpacingTargetX?: number;
     private abbreviateUpperChord: boolean = false;
     private upperHarmonySignature: string;
     private bassSignature: string;
@@ -108,6 +111,14 @@ export class GraphicalChordSymbolContainer extends GraphicalObject {
 
     public get RhythmicAnchorOffsetX(): number {
         return this.rhythmicAnchorOffsetX;
+    }
+
+    public set HorizontalSpacingTargetX(value: number | undefined) {
+        this.horizontalSpacingTargetX = value;
+    }
+
+    public get HorizontalSpacingTargetX(): number | undefined {
+        return this.horizontalSpacingTargetX;
     }
 
     /**
