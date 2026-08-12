@@ -54,6 +54,7 @@ const noteheadAttachments: readonly SlurAnchorCandidate["type"][] = [
   "outer-head",
 ];
 const noteheadDisplacementFactor: number = 0.65;
+const compactInStaffSpan: number = 5;
 
 const finitePoint: (point: PointF2D) => boolean = (point: PointF2D): boolean =>
   Number.isFinite(point.x) && Number.isFinite(point.y);
@@ -352,6 +353,12 @@ function contourPressureRatio(
   if (width <= 0.001) {
     return 0.5;
   }
+  if (isUnobstructedCompactCurve(context, start, end)) {
+    // Endpoint noteheads dominate a short envelope and can pull its sampled
+    // pressure to one side even though there is no internal notation to
+    // avoid. Keep that ordinary two-note gesture optically balanced.
+    return 0.5;
+  }
   const samples: {ratio: number, pressure: number}[] = [];
   for (let sample: number = 0; sample <= 32; sample++) {
     const ratio: number = 0.12 + (sample / 32) * 0.76;
@@ -424,23 +431,40 @@ function lineY(start: { x: number, y: number }, end: { x: number, y: number }, x
   return start.y + (end.y - start.y) * ((x - start.x) / width);
 }
 
+function compactReferenceSpan(
+  context: SlurLayoutContext,
+  start: {x: number, y: number},
+  end: {x: number, y: number},
+): number {
+  // Classify the musical gap rather than the candidate's attachment span.
+  // Otherwise moving from the crown to an inward notehead edge can make one
+  // candidate "compact" while a centred candidate for the same two notes is
+  // not, rewarding visibly loose endpoints near the cutoff.
+  const startX: number = context.start.notehead?.right ?? start.x;
+  const endX: number = context.end.notehead?.left ?? end.x;
+  return Math.abs(endX - startX);
+}
+
 function requiredObstacleBow(
   context: SlurLayoutContext,
-  start: SlurAnchorCandidate,
-  end: SlurAnchorCandidate,
+  start: {x: number, y: number},
+  end: {x: number, y: number},
 ): number {
   let required: number = 0;
   const middleX: number = (start.x + end.x) / 2;
   const middleBaseline: number = lineY(start, end, middleX);
-  const staffEdgeClearance: number = 0.12;
-  const staffEdgeBow: number = context.direction === PlacementEnum.Above
-    ? middleBaseline - (context.envelope.topLineOffset - staffEdgeClearance)
-    : context.envelope.bottomLineOffset + staffEdgeClearance - middleBaseline;
-  // At t=0.5, equal cubic controls contribute 0.75 of their bow. This gives
-  // the high family a genuine route outside the staff while retaining its
-  // notehead attachments, instead of making remote stem tips the only way to
-  // avoid a staff-line penalty.
-  required = Math.max(required, staffEdgeBow / 0.75);
+  if (compactReferenceSpan(context, start, end) >= compactInStaffSpan) {
+    const staffEdgeClearance: number = 0.12;
+    const staffEdgeBow: number = context.direction === PlacementEnum.Above
+      ? middleBaseline - (context.envelope.topLineOffset - staffEdgeClearance)
+      : context.envelope.bottomLineOffset + staffEdgeClearance - middleBaseline;
+    // At t=0.5, equal cubic controls contribute 0.75 of their bow. This gives
+    // a phrase-length high family a genuine route outside the staff while
+    // retaining its notehead attachments. A clear adjacent-note slur may
+    // remain within the staff; forcing it around the staff edge makes it much
+    // larger than the gesture it describes.
+    required = Math.max(required, staffEdgeBow / 0.75);
+  }
   for (const obstacle of context.obstacles) {
     if (!isForbiddenObstacle(obstacle)) {
       continue;
@@ -492,6 +516,17 @@ function requiredObstacleBow(
     }
   }
   return Math.max(0, required);
+}
+
+function isUnobstructedCompactCurve(
+  context: SlurLayoutContext,
+  start: {x: number, y: number},
+  end: {x: number, y: number},
+): boolean {
+  return context.start.articulations.length === 0 &&
+    context.end.articulations.length === 0 &&
+    compactReferenceSpan(context, start, end) < compactInStaffSpan &&
+    requiredObstacleBow(context, start, end) <= 0.001;
 }
 
 function familyGeometry(
@@ -869,6 +904,11 @@ function evaluateGeometry(
   let forbiddenObstacleIntersections: number = 0;
   const forbiddenObstacleIds: Set<string> = new Set<string>();
   let staffLineInteraction: number = 0;
+  const permitsInStaff: boolean = isUnobstructedCompactCurve(
+    context,
+    geometry.p0,
+    geometry.p3,
+  );
   const endpointEnvelopeFraction: number = Math.abs(geometry.p3.x - geometry.p0.x) < 10 ? 0.28 : 0.16;
   for (let index: number = 1; index < count; index++) {
     const t: number = index / count;
@@ -897,7 +937,8 @@ function evaluateGeometry(
       !insideEndAttachment;
     if (
       Number.isFinite(envelopeValue) &&
-      interiorSample
+      interiorSample &&
+      !permitsInStaff
     ) {
       const clearance: number =
         context.direction === PlacementEnum.Above
@@ -910,7 +951,7 @@ function evaluateGeometry(
       }
       excessiveClearance += Math.max(0, clearance - options.maximumPreferredClearance) / count;
     }
-    if (interiorSample) {
+    if (interiorSample && !permitsInStaff) {
       if (context.direction === PlacementEnum.Above) {
         staffLineInteraction += Math.max(0, point.y - context.envelope.topLineOffset + 0.1) / count;
       } else {
@@ -1305,6 +1346,11 @@ export function calculateCandidateSlurLayout(
   outer: for (const pair of anchorPairs) {
     const startAnchor: SlurAnchorCandidate = pair.start;
     const endAnchor: SlurAnchorCandidate = pair.end;
+      const unobstructedCompactCurve: boolean = isUnobstructedCompactCurve(
+        context,
+        startAnchor,
+        endAnchor,
+      );
       for (const family of curveFamilies) {
         const anchorWidth: number = Math.abs(endAnchor.x - startAnchor.x);
         if (
@@ -1314,6 +1360,15 @@ export function calculateCandidateSlurLayout(
           // These families are optical reductions for genuinely broad
           // phrases. On compact and cross-staff gestures they make the slur
           // read as a loose diagonal or an under-curved tie.
+          continue;
+        }
+        if (
+          unobstructedCompactCurve &&
+          (family === "start-weighted" || family === "end-weighted")
+        ) {
+          // Weighted families deliberately bias the crown toward notation
+          // pressure. With no internal obstacle, that bias only turns a short
+          // two-note slur into an oversized, skewed hook.
           continue;
         }
         if (

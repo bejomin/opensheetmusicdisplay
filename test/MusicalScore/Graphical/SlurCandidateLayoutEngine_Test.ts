@@ -542,6 +542,74 @@ describe("candidate slur layout engine", (): void => {
     expect(result.candidates.some((candidate) => candidate.family === "normal")).to.equal(true);
   });
 
+  it("keeps an unobstructed adjacent-note slur shallow and balanced within the staff", (): void => {
+    const compactSeed: SlurCurveGeometry = {
+      p0: new PointF2D(2, 1.2),
+      p1: new PointF2D(3.4, 0.4),
+      p2: new PointF2D(5.6, 0.4),
+      p3: new PointF2D(7, 1.2),
+    };
+    const result: SlurLayoutResult = calculateCandidateSlurLayout(
+      context({end: endpoint("end", 7)}),
+      compactSeed,
+      options,
+    );
+    const selected: SlurCurveCandidate = result.candidates.find(
+      (candidate): boolean => candidate.id === result.selectedCandidateId,
+    );
+    const midpoint: number = (selected.geometry.p0.x + selected.geometry.p3.x) / 2;
+    const firstControlOffset: number = midpoint - selected.geometry.p1.x;
+    const secondControlOffset: number = selected.geometry.p2.x - midpoint;
+    const bow: number = Math.max(
+      Math.abs(selected.geometry.p1.y - selected.geometry.p0.y),
+      Math.abs(selected.geometry.p2.y - selected.geometry.p3.y),
+    );
+
+    expect(selected.family).to.equal("normal");
+    expect(selected.startAnchor.type).to.equal("notehead-center");
+    expect(selected.endAnchor.type).to.equal("notehead-center");
+    expect(selected.score.clearance).to.equal(0);
+    expect(selected.score.staffLineInteraction).to.equal(0);
+    expect(firstControlOffset).to.be.closeTo(secondControlOffset, 0.001);
+    expect(bow).to.be.lessThan(1);
+    expect(result.candidates.some(
+      (candidate): boolean =>
+        candidate.family === "start-weighted" || candidate.family === "end-weighted",
+    )).to.equal(false);
+  });
+
+  it("retains weighted and high routes for a compact slur with an internal obstacle", (): void => {
+    const compactSeed: SlurCurveGeometry = {
+      p0: new PointF2D(2, 1.2),
+      p1: new PointF2D(3.1, 0.4),
+      p2: new PointF2D(4.9, 0.4),
+      p3: new PointF2D(6, 1.2),
+    };
+    const result: SlurLayoutResult = calculateCandidateSlurLayout(
+      context({
+        end: endpoint("end", 6),
+        obstacles: [{
+          id: "compact-internal-notehead",
+          type: "notehead",
+          bounds: {left: 3.5, right: 4.5, top: -0.8, bottom: 0.8},
+          clearance: 0.1,
+        }],
+      }),
+      compactSeed,
+      options,
+    );
+
+    expect(result.candidates.some(
+      (candidate): boolean => candidate.family === "start-weighted",
+    )).to.equal(true);
+    expect(result.candidates.some(
+      (candidate): boolean => candidate.family === "end-weighted",
+    )).to.equal(true);
+    expect(result.candidates.some(
+      (candidate): boolean => candidate.family === "high" && !candidate.rejected,
+    )).to.equal(true);
+  });
+
   it("widens compact control arms that would hook into an endpoint", (): void => {
     const compactSeed: SlurCurveGeometry = {
       p0: new PointF2D(2, 1.2),
