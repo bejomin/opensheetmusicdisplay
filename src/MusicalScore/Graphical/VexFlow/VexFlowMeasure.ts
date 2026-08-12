@@ -701,44 +701,49 @@ export class VexFlowMeasure extends GraphicalMeasure {
                 newSkylineValueForMeasure = skylineMinForMeasure;
             }
 
-            let prevMeasure: VexFlowMeasure = undefined;
-            //if we already have a volta in the prev measure, should match it's height, or if we are higher, it should match ours
-            //find previous sibling measure that may have volta
-            const currentMeasureNumber: number = this.parentSourceMeasure.MeasureNumber;
-            for (let i: number = 0; i < this.ParentStaffLine.Measures.length; i++) {
-                const tempMeasure: GraphicalMeasure = this.ParentStaffLine.Measures[i];
-                if (!(tempMeasure instanceof VexFlowMeasure)) {
-                    // can happen for MultipleRestMeasures
-                    continue;
+            const isVoltaModifier: (modifier: VF.StaveModifier) => boolean =
+                (modifier: VF.StaveModifier): boolean => {
+                    const category: string = modifier.getCategory?.();
+                    return category === "voltas" || category === "Volta";
+                };
+            const previousVoltaMeasures: VexFlowMeasure[] = [];
+            const stafflineMeasures: GraphicalMeasure[] = this.ParentStaffLine.Measures;
+            const currentMeasureIndex: number = stafflineMeasures.indexOf(this);
+            for (let i: number = currentMeasureIndex - 1; i >= 0; i--) {
+                const candidate: GraphicalMeasure = stafflineMeasures[i];
+                if (!(candidate instanceof VexFlowMeasure) ||
+                    !candidate.stave.getModifiers().some(isVoltaModifier)) {
+                    break;
                 }
-                if (tempMeasure.MeasureNumber === currentMeasureNumber - 1 ||
-                    tempMeasure.MeasureNumber + tempMeasure.parentSourceMeasure?.multipleRestMeasures === currentMeasureNumber) {
-                    //We found the previous top measure
-                    prevMeasure = tempMeasure as VexFlowMeasure;
-                }
+                previousVoltaMeasures.push(candidate);
             }
 
+            const prevMeasure: VexFlowMeasure = previousVoltaMeasures[0];
             if (prevMeasure) {
-                const prevStaveModifiers: VF.StaveModifier[] = prevMeasure.stave.getModifiers();
-                for (let i: number = 0; i < prevStaveModifiers.length; i++) {
-                    const nextStaveModifier: VF.StaveModifier = prevStaveModifiers[i];
-                    const modifierCategory: string = nextStaveModifier.getCategory?.();
-                    if (modifierCategory === "voltas" || modifierCategory === "Volta") {
-                        const prevskyBottomLineCalculator: SkyBottomLineCalculator = prevMeasure.ParentStaffLine.SkyBottomLineCalculator;
-                        const prevStart: number = prevMeasure.PositionAndShape.AbsolutePosition.x + prevMeasure.PositionAndShape.BorderMarginLeft + 0.4;
-                        const prevEnd: number = Math.max(
-                            prevMeasure.PositionAndShape.AbsolutePosition.x + prevMeasure.PositionAndShape.BorderMarginRight,
-                            prevStart + 0.4);
-                        const prevMeasureSkyline: number = prevskyBottomLineCalculator.getSkyLineMinInRange(prevStart, prevEnd);
-                        //if prev skyline is higher, use it
-                        if (prevMeasureSkyline <= newSkylineValueForMeasure) {
-                            const skylineDifference: number = prevMeasureSkyline - newSkylineValueForMeasure;
-                            vexFlowVoltaHeight += skylineDifference;
-                            newSkylineValueForMeasure = prevMeasureSkyline;
-                        } else { //otherwise, we are higher. Need to adjust prev
-                            (nextStaveModifier as any).setYShift?.(vexFlowVoltaHeight * unitInPixels);
-                            prevMeasure.ParentStaffLine.SkyBottomLineCalculator.updateSkyLineInRange(prevStart, prevEnd, newSkylineValueForMeasure);
+                const prevskyBottomLineCalculator: SkyBottomLineCalculator = prevMeasure.ParentStaffLine.SkyBottomLineCalculator;
+                const prevStart: number = prevMeasure.PositionAndShape.AbsolutePosition.x + prevMeasure.PositionAndShape.BorderMarginLeft + 0.4;
+                const prevEnd: number = Math.max(
+                    prevMeasure.PositionAndShape.AbsolutePosition.x + prevMeasure.PositionAndShape.BorderMarginRight,
+                    prevStart + 0.4);
+                const prevMeasureSkyline: number = prevskyBottomLineCalculator.getSkyLineMinInRange(prevStart, prevEnd);
+                //if prev skyline is higher, use it
+                if (prevMeasureSkyline <= newSkylineValueForMeasure) {
+                    const skylineDifference: number = prevMeasureSkyline - newSkylineValueForMeasure;
+                    vexFlowVoltaHeight += skylineDifference;
+                    newSkylineValueForMeasure = prevMeasureSkyline;
+                } else { //otherwise, we are higher. Need to adjust the complete preceding volta run
+                    for (const connectedMeasure of previousVoltaMeasures) {
+                        for (const modifier of connectedMeasure.stave.getModifiers().filter(isVoltaModifier)) {
+                            (modifier as any).setYShift?.(vexFlowVoltaHeight * unitInPixels);
                         }
+                        const connectedStart: number = connectedMeasure.PositionAndShape.AbsolutePosition.x +
+                            connectedMeasure.PositionAndShape.BorderMarginLeft + 0.4;
+                        const connectedEnd: number = Math.max(
+                            connectedMeasure.PositionAndShape.AbsolutePosition.x +
+                                connectedMeasure.PositionAndShape.BorderMarginRight,
+                            connectedStart + 0.4);
+                        connectedMeasure.ParentStaffLine.SkyBottomLineCalculator.updateSkyLineInRange(
+                            connectedStart, connectedEnd, newSkylineValueForMeasure);
                     }
                 }
             }

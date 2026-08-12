@@ -151,6 +151,31 @@ describe("VexFlow Measure", () => {
       expect(Math.max(...endingYShifts) - Math.min(...endingYShifts)).to.be.lessThan(0.001);
    });
 
+   it("propagates a later volta's higher lane through the preceding adjacent run", async (): Promise<void> => {
+      const source: Document = TestUtils.getScore("test_repeat_volta_1_2_3.musicxml");
+      const score: Document = source.cloneNode(true) as Document;
+      const thirdEndingOctave: Element = score.querySelector('measure[number="4"] pitch octave');
+      thirdEndingOctave.textContent = "7";
+      const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(
+         TestUtils.getDivElement(document),
+      );
+      await osmd.load(score);
+      osmd.render();
+
+      const voltaYShift: (measureIndex: number) => number = (measureIndex: number): number => {
+         const measure: GraphicalMeasure = osmd.GraphicSheet.findGraphicalMeasure(measureIndex, 0);
+         const volta: any = (measure as any).stave.getModifiers().find((modifier: any): boolean => {
+            const category: string = modifier.getCategory?.();
+            return category === "voltas" || category === "Volta";
+         });
+         expect(volta, `measure ${measureIndex + 1} volta`).to.not.equal(undefined);
+         return volta.getYShift();
+      };
+      const endingYShifts: number[] = [1, 2, 3].map(voltaYShift);
+
+      expect(Math.max(...endingYShifts) - Math.min(...endingYShifts)).to.be.lessThan(0.001);
+   });
+
    it("uses the open lower notehead edge for a stem-down chord tie", async (): Promise<void> => {
       const xml: string = `<?xml version="1.0" encoding="UTF-8"?>
 <score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
