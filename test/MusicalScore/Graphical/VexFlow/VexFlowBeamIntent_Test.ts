@@ -76,11 +76,25 @@ describe("VexFlow authored and cross-staff beams", () => {
     expect(vfBeam).to.not.equal(undefined);
     expect(vfBeam.renderOptions.flatBeams).to.equal(true);
     expect(vfBeam.slope).to.equal(0);
-    const staveY: number = (lowerMeasure as any).stave.getY();
+    const stave: any = (lowerMeasure as any).stave;
+    const staveY: number = stave.getY();
     expect(
       Math.abs(vfBeam.renderOptions.flatBeamOffset - staveY),
       "the calculated flat beam follows the stave from layout coordinates to page coordinates",
     ).to.be.lessThan(100);
+
+    // The cached VexFlow offset is an absolute canvas coordinate. A redraw must
+    // derive it from the current note positions, even if an earlier pass left a
+    // stale value from a different page or zoom coordinate space.
+    vfBeam.renderOptions.flatBeamOffset = -5000;
+    vfBeam.renderOptions.flat_beam_offset = -5000;
+    lowerMeasure.setAbsoluteCoordinates(stave.getX(), staveY + 600);
+    expect(
+      Math.abs(vfBeam.renderOptions.flatBeamOffset - (staveY + 600)),
+      "a translated authored flat beam discards its stale absolute offset",
+    ).to.be.lessThan(100);
+    lowerMeasure.setAbsoluteCoordinates(stave.getX(), staveY);
+    expect(Math.abs(vfBeam.renderOptions.flatBeamOffset - staveY)).to.be.lessThan(100);
   });
 
   it("draws one ordered beam across both staves without a duplicate", (): void => {
@@ -98,6 +112,10 @@ describe("VexFlow authored and cross-staff beams", () => {
     expect(vfBeam.getNotes()).to.have.length(6);
     expect(new Set(vfBeam.getNotes().map((note): unknown => note.getStave())).size).to.equal(2);
     expect(vfBeam.getNotes().every((note: any): boolean => note.getBeam() === vfBeam)).to.equal(true);
+    expect(
+      vfBeam.getNotes().map((note: any): number => note.getStemDirection()),
+      "cross-staff notes retain their explicit MusicXML stem directions",
+    ).to.deep.equal([1, 1, 1, -1, 1, -1]);
     const polygonYs: number[] = vfBeam.getRenderedBeamPolygons()
       .flatMap((polygon: any): number[] => polygon.points.map((point: any): number => point.y));
     const staveYs: number[] = [(upperMeasure as any).stave.getY(), (lowerMeasure as any).stave.getY()];

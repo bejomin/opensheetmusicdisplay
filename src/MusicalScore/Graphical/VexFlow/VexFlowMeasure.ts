@@ -209,26 +209,6 @@ export class VexFlowMeasure extends GraphicalMeasure {
 
     // Sets the absolute coordinates of the VFStave on the canvas
     public setAbsoluteCoordinates(x: number, y: number): void {
-        const previousY: number = this.stave.getY();
-        const deltaY: number = y - previousY;
-        if (Number.isFinite(deltaY) && Math.abs(deltaY) > 0.0001) {
-            for (const vfBeams of Object.values(this.vfbeams)) {
-                for (const vfBeam of vfBeams) {
-                    const renderOptions: BeamRenderOptionsCompat = getBeamRenderOptions(vfBeam);
-                    if (renderOptions.flatBeams && Number.isFinite(renderOptions.flatBeamOffset)) {
-                        // VexFlow stores an automatically calculated flat-beam offset as an
-                        // absolute canvas Y. OSMD positions staves twice (system-local during
-                        // layout, then page-absolute while drawing), so carry the beam with it.
-                        setBeamRenderOption(
-                            vfBeam,
-                            "flatBeamOffset",
-                            "flat_beam_offset",
-                            renderOptions.flatBeamOffset + deltaY,
-                        );
-                    }
-                }
-            }
-        }
         this.stave.setX(x).setY(y);
         for (const staffEntry of this.staffEntries as VexFlowStaffEntry[]) {
             for (const voiceEntry of staffEntry.graphicalVoiceEntries as VexFlowVoiceEntry[]) {
@@ -236,6 +216,11 @@ export class VexFlowMeasure extends GraphicalMeasure {
                 vfNote?.setStave?.(this.stave);
             }
         }
+        // VexFlow caches an automatically chosen flat-beam offset as an absolute
+        // canvas Y. Recalculate authored flat beams from their newly translated
+        // notes instead of translating that cache: the same measure moves through
+        // system-local, page-absolute, zoom and redraw coordinate spaces.
+        this.refreshAuthoredFlatBeamGeometry();
     }
 
     /** Recalculate beam slopes and stem extensions after every staff in the system has its final relative Y. */
@@ -250,6 +235,22 @@ export class VexFlowMeasure extends GraphicalMeasure {
                     setBeamRenderOption(vfBeam, "flatBeamOffset", "flat_beam_offset", undefined);
                 }
                 beamWithIntent.postFormatted = false;
+                vfBeam.postFormat();
+            }
+        }
+    }
+
+    private refreshAuthoredFlatBeamGeometry(): void {
+        for (const vfBeams of Object.values(this.vfbeams)) {
+            for (const vfBeam of vfBeams) {
+                if (!(vfBeam as any).osmdAuthoredFlatBeam) {
+                    continue;
+                }
+                for (const note of vfBeam.getNotes()) {
+                    note.getStem()?.setExtension(note.getStemExtension());
+                }
+                setBeamRenderOption(vfBeam, "flatBeamOffset", "flat_beam_offset", undefined);
+                (vfBeam as any).postFormatted = false;
                 vfBeam.postFormat();
             }
         }
@@ -1456,6 +1457,9 @@ export class VexFlowMeasure extends GraphicalMeasure {
                     const notes: VF.StaveNote[] = [];
                     const psBeam: Beam = beam[0];
                     const voiceEntries: VexFlowVoiceEntry[] = beam[1];
+                    const isCrossStaffBeam: boolean = psBeam.Notes.some(
+                        (note: Note): boolean => note.ParentStaff !== psBeam.Notes[0]?.ParentStaff,
+                    );
 
                     let autoStemBeam: boolean = true;
                     for (const gve of voiceEntries) {
@@ -1466,6 +1470,27 @@ export class VexFlowMeasure extends GraphicalMeasure {
                             //     // this fix seemed temporarily necessary for tuplets with beams, see test_drum_tublet_beams
                             //     break;
                             // }
+                        }
+                    }
+
+                    if (isCrossStaffBeam) {
+                        // VexFlow formats each staff's voices before OSMD can assemble
+                        // one beam spanning those staves. Voice collision formatting can
+                        // change the moved notes' stems in that interval, so restore the
+                        // explicit MusicXML directions before Beam captures them. Mixed
+                        // directions are how VexFlow represents a true cross-staff beam.
+                        autoStemBeam = false;
+                        for (const entry of voiceEntries) {
+                            const sourceStemDirection: StemDirectionType =
+                                entry.parentVoiceEntry.StemDirectionXml;
+                            const vexFlowNote: VF.StaveNote = entry.vfStaveNote as StaveNote;
+                            if (sourceStemDirection === StemDirectionType.Up) {
+                                vexFlowNote?.setStemDirection(VF.Stem.UP);
+                                entry.parentVoiceEntry.StemDirection = StemDirectionType.Up;
+                            } else if (sourceStemDirection === StemDirectionType.Down) {
+                                vexFlowNote?.setStemDirection(VF.Stem.DOWN);
+                                entry.parentVoiceEntry.StemDirection = StemDirectionType.Down;
+                            }
                         }
                     }
 
