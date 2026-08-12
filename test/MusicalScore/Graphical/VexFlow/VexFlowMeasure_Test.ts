@@ -680,7 +680,9 @@ describe("VexFlow Measure", () => {
       canvas.height = 160;
       const rawContext: CanvasRenderingContext2D = canvas.getContext("2d");
       const originalFillText: typeof rawContext.fillText = rawContext.fillText.bind(rawContext);
+      const originalFillRect: typeof rawContext.fillRect = rawContext.fillRect.bind(rawContext);
       const whiteTextPasses: {x: number, y: number}[] = [];
+      const whiteBackingRects: {x: number, y: number, width: number, height: number}[] = [];
       rawContext.fillText = ((text: string, x: number, y: number, maxWidth?: number): void => {
          if (String(rawContext.fillStyle).toLowerCase() === "#ffffff") {
             whiteTextPasses.push({x, y});
@@ -691,6 +693,12 @@ describe("VexFlow Measure", () => {
             originalFillText(text, x, y, maxWidth);
          }
       }) as typeof rawContext.fillText;
+      rawContext.fillRect = ((x: number, y: number, width: number, height: number): void => {
+         if (String(rawContext.fillStyle).toLowerCase() === "#ffffff") {
+            whiteBackingRects.push({x, y, width, height});
+         }
+         originalFillRect(x, y, width, height);
+      }) as typeof rawContext.fillRect;
 
       const renderer: VF.Renderer = new VF.Renderer(canvas, VF.Renderer.Backends.CANVAS);
       renderer.resize(canvas.width, canvas.height);
@@ -707,6 +715,10 @@ describe("VexFlow Measure", () => {
 
       expect(whiteTextPasses, "Canvas receives the eight small white glyph-shaped knockout passes")
          .to.have.length(8);
+      expect(whiteBackingRects, "Canvas receives one solid backing that clears the numeral's counters")
+         .to.have.length(1);
+      expect(whiteBackingRects[0].width, "solid backing has a measured glyph width").to.be.greaterThan(0);
+      expect(whiteBackingRects[0].height, "solid backing has a measured glyph height").to.be.greaterThan(0);
       expect(Math.max(...whiteTextPasses.map((pass): number => pass.x)) -
          Math.min(...whiteTextPasses.map((pass): number => pass.x)),
       "the knockout extends 3px to either side of the glyph").to.equal(6);

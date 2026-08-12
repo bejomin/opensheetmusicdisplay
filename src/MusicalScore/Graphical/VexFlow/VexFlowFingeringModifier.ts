@@ -97,7 +97,7 @@ export class VexFlowFingeringModifier extends VF.FretHandFinger {
         }
 
         if (this.position === VF.Modifier.Position.LEFT && this.overlapsStaff(note, textY, textMetrics)) {
-            this.drawStaffLineKnockout(ctx, textX, textY);
+            this.drawStaffLineKnockout(ctx, textX, textY, textMetrics);
         }
         this.renderText(ctx, textX, textY);
         if (this.substitution &&
@@ -172,10 +172,9 @@ export class VexFlowFingeringModifier extends VF.FretHandFinger {
         return glyphBottom >= top && glyphTop <= bottom;
     }
 
-    /** Paint the glyph a fraction of a pixel in every direction before the
-     * foreground pass. This erases staff lines around the digit's outline
-     * without introducing a visible rectangular patch. */
-    private drawStaffLineKnockout(ctx: VF.RenderContext, x: number, y: number): void {
+    /** Fill the numeral's tight bounds, including counters, then paint the
+     * glyph around that backing to retain a small outline-following halo. */
+    private drawStaffLineKnockout(ctx: VF.RenderContext, x: number, y: number, metrics: TextMetrics): void {
         const radius: number = VexFlowFingeringModifier.StaffKnockoutRadiusPx;
         const offsets: [number, number][] = [
             [-radius, 0], [radius, 0], [0, -radius], [0, radius],
@@ -183,6 +182,15 @@ export class VexFlowFingeringModifier extends VF.FretHandFinger {
         ];
         ctx.save();
         ctx.setFillStyle(VexFlowFingeringModifier.StaffKnockoutColor);
+        const renderedX: number = x + this.getX() + this.getXShift();
+        const renderedBaselineY: number = y + this.getY() + this.getYShift();
+        const left: number = renderedX - (metrics.actualBoundingBoxLeft ?? 0);
+        const top: number = renderedBaselineY - (metrics.actualBoundingBoxAscent ?? this.getHeight() * 0.8);
+        const width: number = (metrics.actualBoundingBoxLeft ?? 0) +
+            (metrics.actualBoundingBoxRight ?? metrics.width);
+        const height: number = (metrics.actualBoundingBoxAscent ?? this.getHeight() * 0.8) +
+            (metrics.actualBoundingBoxDescent ?? this.getHeight() * 0.2);
+        ctx.fillRect(left, top, width, height);
         for (const [dx, dy] of offsets) {
             this.renderText(ctx, x + dx, y + dy);
         }
