@@ -220,6 +220,23 @@ function continuationBoundaryTarget(
       oppositeAnchorY - maximumTravel,
       Math.min(oppositeAnchorY + maximumTravel, target),
     );
+    // Blending towards the local skyline must not reverse this fragment of a
+    // directed cross-system phrase. Retain a short part of the projected
+    // travel so the continuation still approaches its real endpoint from the
+    // same direction as the complete source-to-destination trajectory.
+    const directionalTravel: number = trajectory.continuationSlope * Math.min(run, 2);
+    const directionalTarget: number = side === "start"
+      ? oppositeAnchorY - directionalTravel
+      : oppositeAnchorY + directionalTravel;
+    if (trajectory.continuationSlope < 0) {
+      target = side === "start"
+        ? Math.max(target, directionalTarget)
+        : Math.min(target, directionalTarget);
+    } else if (trajectory.continuationSlope > 0) {
+      target = side === "start"
+        ? Math.min(target, directionalTarget)
+        : Math.max(target, directionalTarget);
+    }
     const chordSlope: number = side === "start"
       ? (oppositeAnchorY - target) / Math.max(0.001, run)
       : (target - oppositeAnchorY) / Math.max(0.001, run);

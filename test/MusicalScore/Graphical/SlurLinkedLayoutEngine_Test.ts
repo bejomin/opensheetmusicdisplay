@@ -242,6 +242,26 @@ describe("linked slur layout engine", (): void => {
     expect(returning.p0.y).to.be.greaterThan(returning.p3.y);
   });
 
+  it("does not let skyline blending reverse a short returning fragment", (): void => {
+    const first: SlurLinkedLayoutInput = input(0, false, true);
+    const second: SlurLinkedLayoutInput = input(1, true, false);
+    first.context.isCrossStaff = true;
+    second.context.isCrossStaff = true;
+    first.staffOffsetY = 8;
+    second.staffOffsetY = 0;
+    first.context.end.seedAnchor.x = 100;
+    first.seed.p3.x = 100;
+    second.context.end.seedAnchor.x = 6;
+    second.context.end.notehead = {left: 5.5, right: 6.5, top: 2.5, bottom: 3.5};
+    second.seed.p3.x = 6;
+
+    const output: SlurLinkedLayoutOutput = calculateLinkedSlurLayouts([first, second], options);
+    const returning: SlurCurveGeometry = output.results[1].geometry;
+
+    expect(output.diagnostics.continuationSlope).to.be.lessThan(0);
+    expect(returning.p0.y).to.be.greaterThan(returning.p3.y);
+  });
+
   it("keeps a short return close to its destination instead of making a steep hook", (): void => {
     const first: SlurLinkedLayoutInput = input(0, false, true);
     const second: SlurLinkedLayoutInput = input(1, true, false);
