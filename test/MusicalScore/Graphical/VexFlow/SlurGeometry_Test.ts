@@ -699,6 +699,8 @@ describe("Stage 6 slur geometry", (): void => {
       expect(segments.flatMap((segment) => segment.diagnostics.structuredFaults ?? [])).to.have.length(0);
       expect(segments[0].diagnostics.endAttachment).to.equal("system-edge");
       expect(segments[1].diagnostics.startAttachment).to.equal("system-edge");
+      expect(segments[0].layoutContext?.start?.pitchHalfTone).to.equal(36);
+      expect(segments[1].layoutContext?.end?.pitchHalfTone).to.equal(55);
       expect(segments[0].diagnostics.linkedSourceSemanticHeight)
          .to.be.greaterThan(segments[0].diagnostics.linkedDestinationSemanticHeight);
       expect(segments[0].diagnostics.linkedContinuationSlope).to.be.lessThan(0);

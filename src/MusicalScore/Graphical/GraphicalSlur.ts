@@ -14,6 +14,7 @@ import { GraphicalStaffEntry } from "./GraphicalStaffEntry";
 import { GraphicalVoiceEntry } from "./GraphicalVoiceEntry";
 import { Fraction } from "../../Common/DataObjects/Fraction";
 import { ArticulationEnum, StemDirectionType } from "../VoiceData/VoiceEntry";
+import { Note } from "../VoiceData/Note";
 import { VexFlowGraphicalNote } from "./VexFlow";
 import * as VF from "./VexFlow/VexFlowAdapter";
 import {
@@ -759,6 +760,7 @@ export class GraphicalSlur extends GraphicalCurve {
             attachment: SlurEndpointAttachment,
             notehead: GraphicalSlurBoundsDiagnostics,
         ) => SlurEndpointContext = (side, note, x, y, attachment, notehead): SlurEndpointContext => {
+            const sourceNote: Note = side === "start" ? this.slur.StartNote : this.slur.EndNote;
             const rendered: RenderedSlurEndpointGeometry = note
                 ? this.renderedOuterChordGeometry(note, staffLine)
                 : undefined;
@@ -772,7 +774,10 @@ export class GraphicalSlur extends GraphicalCurve {
                 side,
                 present: Boolean(note),
                 sourceNoteId: vexflowNote?.getSVGId?.(),
-                pitchHalfTone: note?.sourceNote?.halfTone,
+                // The graphical endpoint can be absent at a system boundary or
+                // resolved through a browser-dependent staff entry. The source
+                // slur always retains the semantic endpoint pitch.
+                pitchHalfTone: sourceNote?.halfTone,
                 stemDirection: note?.parentVoiceEntry?.parentVoiceEntry?.StemDirection,
                 stemSide,
                 notehead,
