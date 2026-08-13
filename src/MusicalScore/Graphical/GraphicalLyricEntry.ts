@@ -1,5 +1,6 @@
 import {
     LyricAlignmentMode,
+    LyricRole,
     LyricsEntry,
 } from "../VoiceData/Lyrics/LyricsEntry";
 import {GraphicalLyricWord} from "./GraphicalLyricWord";
@@ -21,86 +22,14 @@ export interface LyricFootprint {
 }
 
 /**
- * A lyric label whose optional stanza prefix hangs to the left of the
- * independently anchored lyric body.
- */
-class GraphicalLyricLabel extends GraphicalLabel {
-    private bodyLeftOffset: number = 0;
-    private bodyRightOffset: number = 0;
-    private stanzaNumberPrefix: string;
-
-    constructor(
-        label: Label,
-        textHeight: number,
-        alignment: TextAlignmentEnum,
-        rules: EngravingRules,
-        parent: BoundingBox,
-        stanzaNumberPrefix: string,
-    ) {
-        super(label, textHeight, alignment, rules, parent);
-        this.stanzaNumberPrefix = stanzaNumberPrefix;
-    }
-
-    public setStanzaNumberPrefix(stanzaNumberPrefix: string): void {
-        this.stanzaNumberPrefix = stanzaNumberPrefix;
-    }
-
-    public setLabelPositionAndShapeBorders(): void {
-        super.setLabelPositionAndShapeBorders();
-        const boundingBox: BoundingBox = this.PositionAndShape;
-        if (!this.stanzaNumberPrefix || !this.TextLines?.[0]?.runs?.length) {
-            this.bodyLeftOffset = boundingBox.BorderLeft;
-            this.bodyRightOffset = boundingBox.BorderRight;
-            return;
-        }
-
-        const prefixWidth: number = this.TextLines[0].runs[0]?.width ?? 0;
-        const bodyWidth: number = this.TextLines[0].runs
-            .slice(1)
-            .reduce((width: number, run): number => width + run.width, 0);
-        switch (this.Label.textAlignment) {
-            case TextAlignmentEnum.LeftBottom:
-            case TextAlignmentEnum.LeftCenter:
-            case TextAlignmentEnum.LeftTop:
-                this.bodyLeftOffset = 0;
-                break;
-            case TextAlignmentEnum.RightBottom:
-            case TextAlignmentEnum.RightCenter:
-            case TextAlignmentEnum.RightTop:
-                this.bodyLeftOffset = -bodyWidth;
-                break;
-            default:
-                this.bodyLeftOffset = -bodyWidth / 2;
-                break;
-        }
-        this.bodyRightOffset = this.bodyLeftOffset + bodyWidth;
-        const labelLeftOffset: number = this.bodyLeftOffset - prefixWidth;
-        this.TextLines[0].xOffset = labelLeftOffset;
-
-        const leftMargin: number = boundingBox.BorderLeft - boundingBox.BorderMarginLeft;
-        const rightMargin: number = boundingBox.BorderMarginRight - boundingBox.BorderRight;
-        boundingBox.BorderLeft = labelLeftOffset;
-        boundingBox.BorderRight = this.bodyRightOffset;
-        boundingBox.BorderMarginLeft = labelLeftOffset - leftMargin;
-        boundingBox.BorderMarginRight = this.bodyRightOffset + rightMargin;
-    }
-
-    public get BodyLeftOffset(): number {
-        return this.bodyLeftOffset;
-    }
-
-    public get BodyRightOffset(): number {
-        return this.bodyRightOffset;
-    }
-}
-
-/**
  * The graphical counterpart of a [[LyricsEntry]]
  */
 export class GraphicalLyricEntry {
     private lyricsEntry: LyricsEntry;
     private graphicalLyricWord: GraphicalLyricWord;
     private graphicalLabel: GraphicalLabel;
+    private graphicalStanzaNumberLabel: GraphicalLabel;
+    private displayStanzaNumberPrefix: string = "";
     private graphicalStaffEntry: GraphicalStaffEntry;
     private rules: EngravingRules;
 
@@ -115,25 +44,21 @@ export class GraphicalLyricEntry {
                 : rules.LyricsAlignmentStandard;
         const label: Label = new Label(lyricsEntry.LyricText);
         label.fontStyle = lyricsEntry.FontStyle;
-        this.graphicalLabel = new GraphicalLyricLabel(
+        this.graphicalLabel = new GraphicalLabel(
             label,
             lyricsHeight,
             lyricsTextAlignment,
             rules,
             graphicalStaffEntry.PositionAndShape,
-            "",
         );
         this.graphicalLabel.Label.colorDefault = rules.DefaultColorLyrics; // if undefined, no change. saves an if check
         this.graphicalLabel.PositionAndShape.RelativePosition = new PointF2D(0, staffHeight);
-        // Multi-run stanza labels use the anchor offset to cancel drawLabel's
-        // full-label alignment before applying their body-relative xOffset.
-        // The SVG text-anchor itself is only attached to single-run labels.
         if (lyricsTextAlignment === TextAlignmentEnum.CenterBottom) {
             this.graphicalLabel.SvgTextAnchor = "middle";
         } else if (lyricsTextAlignment === TextAlignmentEnum.LeftBottom) {
             this.graphicalLabel.SvgTextAnchor = "start";
         }
-        this.graphicalLabel.LyricLineIdentity = this.getLineIdentity();
+        this.copyLyricMetadata(this.graphicalLabel);
         this.graphicalLabel.setLabelPositionAndShapeBorders(); // needed to have Size.width
     }
 
@@ -143,18 +68,55 @@ export class GraphicalLyricEntry {
      */
     public setDisplayStanzaNumberPrefix(stanzaNumberPrefix: string): void {
         const prefix: string = stanzaNumberPrefix || "";
-        const label: Label = this.graphicalLabel.Label;
-        label.text = `${prefix}${this.lyricsEntry.LyricText}`;
-        label.textLines = prefix
-            ? [{
-                runs: [
-                    { text: prefix },
-                    { text: this.lyricsEntry.LyricText },
-                ],
-            }]
-            : undefined;
-        (this.graphicalLabel as GraphicalLyricLabel).setStanzaNumberPrefix(prefix);
-        this.graphicalLabel.setLabelPositionAndShapeBorders();
+        this.displayStanzaNumberPrefix = prefix;
+        if (!prefix) {
+            this.graphicalStanzaNumberLabel = undefined;
+            return;
+        }
+        const label: Label = new Label(prefix.trimEnd(), TextAlignmentEnum.RightBottom);
+        label.font = this.graphicalLabel.Label.font;
+        label.fontFamily = this.graphicalLabel.Label.fontFamily;
+        label.fontStyle = this.graphicalLabel.Label.fontStyle;
+        label.colorDefault = this.graphicalLabel.Label.colorDefault;
+        this.graphicalStanzaNumberLabel = new GraphicalLabel(
+            label,
+            this.graphicalLabel.Label.fontHeight,
+            TextAlignmentEnum.RightBottom,
+            this.rules,
+            this.graphicalStaffEntry.PositionAndShape,
+        );
+        this.graphicalStanzaNumberLabel.SvgTextAnchor = "end";
+        this.copyLyricMetadata(this.graphicalStanzaNumberLabel);
+        this.graphicalStanzaNumberLabel.setLabelPositionAndShapeBorders();
+        this.positionStanzaNumberImmediatelyBeforeBody();
+    }
+
+    /** Align this entry's generated number to a staff-line-relative column. */
+    public setStanzaNumberColumnRight(columnRight: number, staffEntryXPosition: number): void {
+        if (!this.graphicalStanzaNumberLabel) {
+            return;
+        }
+        this.graphicalStanzaNumberLabel.PositionAndShape.RelativePosition = new PointF2D(
+            columnRight - staffEntryXPosition,
+            this.graphicalLabel.PositionAndShape.RelativePosition.y,
+        );
+    }
+
+    private positionStanzaNumberImmediatelyBeforeBody(): void {
+        if (!this.graphicalStanzaNumberLabel) {
+            return;
+        }
+        const bodyBox: BoundingBox = this.graphicalLabel.PositionAndShape;
+        this.graphicalStanzaNumberLabel.PositionAndShape.RelativePosition = new PointF2D(
+            bodyBox.RelativePosition.x + bodyBox.BorderLeft - this.rules.LyricsStanzaNumberGap,
+            bodyBox.RelativePosition.y,
+        );
+    }
+
+    private copyLyricMetadata(label: GraphicalLabel): void {
+        label.LyricLineIdentity = this.getLineIdentity();
+        label.LyricFamilyIdentity = this.getFamilyIdentity();
+        label.LyricRole = this.getLyricRole();
     }
 
     public hasDashFromLyricWord(): boolean {
@@ -180,6 +142,12 @@ export class GraphicalLyricEntry {
     public set GraphicalLabel(value: GraphicalLabel) {
         this.graphicalLabel = value;
     }
+    public get GraphicalStanzaNumberLabel(): GraphicalLabel {
+        return this.graphicalStanzaNumberLabel;
+    }
+    public get DisplayStanzaNumberPrefix(): string {
+        return this.displayStanzaNumberPrefix;
+    }
     public get StaffEntryParent(): GraphicalStaffEntry {
         return this.graphicalStaffEntry;
     }
@@ -192,26 +160,31 @@ export class GraphicalLyricEntry {
     }
 
     public getFootprint(staffEntryXPosition: number = 0): LyricFootprint {
-        const anchorX: number = this.getAnchorX(staffEntryXPosition);
-        const boundingBox: BoundingBox = this.graphicalLabel.PositionAndShape;
-        const leftEdgeX: number = anchorX + boundingBox.BorderLeft;
-        const rightEdgeX: number = anchorX + boundingBox.BorderRight;
+        const body: LyricFootprint = this.getBodyFootprint(staffEntryXPosition);
+        const stanzaBox: BoundingBox = this.graphicalStanzaNumberLabel?.PositionAndShape;
+        const stanzaAnchorX: number = staffEntryXPosition + (stanzaBox?.RelativePosition.x ?? 0);
+        const leftEdgeX: number = stanzaBox
+            ? Math.min(body.leftEdgeX, stanzaAnchorX + stanzaBox.BorderLeft)
+            : body.leftEdgeX;
+        const rightEdgeX: number = stanzaBox
+            ? Math.max(body.rightEdgeX, stanzaAnchorX + stanzaBox.BorderRight)
+            : body.rightEdgeX;
         return {
-            anchorX,
-            labelWidth: boundingBox.Size.width,
+            anchorX: body.anchorX,
+            labelWidth: rightEdgeX - leftEdgeX,
             leftEdgeX,
-            leftExtent: anchorX - leftEdgeX,
+            leftExtent: body.anchorX - leftEdgeX,
             rightEdgeX,
-            rightExtent: rightEdgeX - anchorX,
+            rightExtent: rightEdgeX - body.anchorX,
         };
     }
 
     /** The lyric body's footprint, excluding a hanging literal stanza prefix. */
     public getBodyFootprint(staffEntryXPosition: number = 0): LyricFootprint {
         const anchorX: number = this.getAnchorX(staffEntryXPosition);
-        const lyricLabel: GraphicalLyricLabel = this.graphicalLabel as GraphicalLyricLabel;
-        const leftEdgeX: number = anchorX + lyricLabel.BodyLeftOffset;
-        const rightEdgeX: number = anchorX + lyricLabel.BodyRightOffset;
+        const boundingBox: BoundingBox = this.graphicalLabel.PositionAndShape;
+        const leftEdgeX: number = anchorX + boundingBox.BorderLeft;
+        const rightEdgeX: number = anchorX + boundingBox.BorderRight;
         return {
             anchorX,
             labelWidth: rightEdgeX - leftEdgeX,
@@ -230,12 +203,15 @@ export class GraphicalLyricEntry {
      * regular verse. Keep both concerns explicit in the key.
      */
     public getLineIdentity(): string {
-        const kind: string = this.lyricsEntry.IsChorus
-            ? "chorus"
-            : this.lyricsEntry.IsTranslation
-                ? "translation"
-                : "verse";
-        return `${kind}:${this.lyricsEntry.VerseNumber || "1"}`;
+        return this.lyricsEntry.LyricLineIdentity;
+    }
+
+    public getFamilyIdentity(): string {
+        return this.lyricsEntry.LyricFamilyIdentity;
+    }
+
+    public getLyricRole(): LyricRole {
+        return this.lyricsEntry.LyricRole;
     }
 
     /** Measure a rendered lyric dash using this entry's actual lyric font. */

@@ -24,6 +24,60 @@ export enum LyricAlignmentMode {
     MelismaLeft = "melisma-left",
 }
 
+export type LyricFamilyKind = "verse" | "chorus";
+export type LyricRole = "source" | "translation";
+
+function stripTranslationSuffix(value: string): string {
+    return value
+        .replace(/(?:[-_:]?translation)$/iu, "")
+        .replace(/(?:^verse[-_:]?)/iu, "")
+        .trim();
+}
+
+type LyricVerseSortKey = {
+    familyKind: LyricFamilyKind;
+    familyNumber: number;
+    familyText: string;
+    role: LyricRole;
+};
+
+function lyricVerseSortKey(value: string): LyricVerseSortKey {
+    const normalized: string = String(value || "1").trim().toLowerCase();
+    const role: LyricRole = normalized.includes("translation") ? "translation" : "source";
+    const familyKind: LyricFamilyKind = normalized.startsWith("chorus") ? "chorus" : "verse";
+    const numericMatch: RegExpMatchArray = normalized.match(/(?:^|:)(\d+)(?:translation)?$/u) ||
+        normalized.match(/^(\d+)(?:translation)?$/u);
+    const familyNumber: number = numericMatch ? Number(numericMatch[1]) : Number.POSITIVE_INFINITY;
+    return {
+        familyKind,
+        familyNumber,
+        familyText: familyKind === "chorus"
+            ? "chorus"
+            : stripTranslationSuffix(normalized) || normalized,
+        role,
+    };
+}
+
+/** Sort source rows immediately before their translations, using numeric verse order. */
+export function compareLyricVerseIdentifiers(left: string, right: string): number {
+    const a: LyricVerseSortKey = lyricVerseSortKey(left);
+    const b: LyricVerseSortKey = lyricVerseSortKey(right);
+    if (a.familyKind !== b.familyKind) {
+        return a.familyKind === "verse" ? -1 : 1;
+    }
+    if (a.familyNumber !== b.familyNumber) {
+        return a.familyNumber - b.familyNumber;
+    }
+    const familyComparison: number = a.familyText.localeCompare(b.familyText, undefined, { numeric: true });
+    if (familyComparison !== 0) {
+        return familyComparison;
+    }
+    if (a.role !== b.role) {
+        return a.role === "source" ? -1 : 1;
+    }
+    return String(left).localeCompare(String(right), undefined, { numeric: true });
+}
+
 export class LyricsEntry {
     constructor(
         text: string,
@@ -131,11 +185,34 @@ export class LyricsEntry {
     }
 
     public get IsTranslation(): boolean {
-        return this.VerseName.endsWith("translation") || this.VerseNumber.endsWith("translation");
+        return /translation$/iu.test(this.VerseName) || /translation$/iu.test(this.VerseNumber);
     }
 
     public get IsChorus(): boolean {
-        return this.VerseName === "chorus" || this.VerseNumber.startsWith("chorus");
+        return /^chorus(?:$|[-_:])/iu.test(this.VerseName) || /^chorus/iu.test(this.VerseNumber);
+    }
+
+    public get LyricFamilyKind(): LyricFamilyKind {
+        return this.IsChorus ? "chorus" : "verse";
+    }
+
+    public get LyricRole(): LyricRole {
+        return this.IsTranslation ? "translation" : "source";
+    }
+
+    /** Stable identity shared by a source lyric and any translated rows beneath it. */
+    public get LyricFamilyIdentity(): string {
+        if (this.IsChorus) {
+            return "chorus:chorus";
+        }
+        const sourceVerseNumber: string = stripTranslationSuffix(this.VerseNumber) || "1";
+        return `verse:${sourceVerseNumber}`;
+    }
+
+    /** Stable identity for one rendered lyric row, distinct from its family identity. */
+    public get LyricLineIdentity(): string {
+        const kind: string = this.IsTranslation ? "translation" : this.LyricFamilyKind;
+        return `${kind}:${this.VerseNumber || "1"}`;
     }
 
     public get FontStyle(): FontStyles {

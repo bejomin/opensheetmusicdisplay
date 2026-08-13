@@ -72,7 +72,11 @@ import { FillEmptyMeasuresWithWholeRests } from "../../OpenSheetMusicDisplay/OSM
 import { IStafflineNoteCalculator } from "../Interfaces/IStafflineNoteCalculator";
 import { GraphicalUnknownExpression } from "./GraphicalUnknownExpression";
 import { GraphicalChordSymbolContainer } from "./GraphicalChordSymbolContainer";
-import { LyricExtendType, LyricsEntry } from "../VoiceData/Lyrics/LyricsEntry";
+import {
+    compareLyricVerseIdentifiers,
+    LyricExtendType,
+    LyricsEntry,
+} from "../VoiceData/Lyrics/LyricsEntry";
 import { Voice } from "../VoiceData/Voice";
 import { TabNote } from "../VoiceData/TabNote";
 import { IHorizontalSystemSpacingPlanner } from "./HorizontalSystemSpacing";
@@ -758,6 +762,8 @@ export abstract class MusicSheetCalculator {
             }
         }
 
+        this.alignStanzaNumberColumn(lyricsStaffEntriesList);
+
         // update BottomLine (on the whole StaffLine's length)
         if (lyricsStaffEntriesList.length > 0) {
             const endX: number = staffLine.PositionAndShape.Size.width;
@@ -768,6 +774,36 @@ export abstract class MusicSheetCalculator {
             skyBottomLineCalculator.updateBottomLineInRange(startX, endX, maxPosition);
         }
         return lyricsStaffEntriesList;
+    }
+
+    /**
+     * Put every generated stanza number on this staff line into one right-aligned
+     * column while preserving each lyric body's independent note-relative anchor.
+     */
+    private alignStanzaNumberColumn(lyricsStaffEntries: GraphicalStaffEntry[]): void {
+        const numberedEntries: Array<{entry: GraphicalLyricEntry, staffEntryX: number}> = [];
+        let earliestBodyLeft: number = Number.POSITIVE_INFINITY;
+        for (const staffEntry of lyricsStaffEntries) {
+            const staffEntryX: number = staffEntry.parentMeasure.PositionAndShape.RelativePosition.x +
+                staffEntry.PositionAndShape.RelativePosition.x;
+            for (const entry of staffEntry.LyricsEntries) {
+                if (!entry.DisplayStanzaNumberPrefix || !entry.GraphicalStanzaNumberLabel) {
+                    continue;
+                }
+                earliestBodyLeft = Math.min(
+                    earliestBodyLeft,
+                    entry.getBodyFootprint(staffEntryX).leftEdgeX,
+                );
+                numberedEntries.push({entry, staffEntryX});
+            }
+        }
+        if (!numberedEntries.length || !isFinite(earliestBodyLeft)) {
+            return;
+        }
+        const columnRight: number = earliestBodyLeft - this.rules.LyricsStanzaNumberGap;
+        for (const {entry, staffEntryX} of numberedEntries) {
+            entry.setStanzaNumberColumnRight(columnRight, staffEntryX);
+        }
     }
 
     /**
@@ -3690,7 +3726,7 @@ export abstract class MusicSheetCalculator {
         for (let idx: number = 0, len: number = this.graphicalMusicSheet.ParentMusicSheet.Instruments.length; idx < len; ++idx) {
             const instrument: Instrument = this.graphicalMusicSheet.ParentMusicSheet.Instruments[idx];
             if (instrument.HasLyrics && instrument.LyricVersesNumbers.length > 0) {
-                instrument.LyricVersesNumbers.sort();
+                instrument.LyricVersesNumbers.sort(compareLyricVerseIdentifiers);
             }
         }
         // first calc lyrics text positions

@@ -249,6 +249,16 @@ export class LyricsReader {
 
     private resolveLyricVerseIdentifier(lyricNode: IXmlElement, lyricVerseName: string): string {
         const lyricNumberAttribute: string = lyricNode.attribute("number")?.value?.trim() || "";
+        if (/translation$/iu.test(lyricVerseName)) {
+            if (/^chorus(?:$|[-_:])/iu.test(lyricVerseName)) {
+                return "chorustranslation";
+            }
+            if (/translation$/iu.test(lyricNumberAttribute)) {
+                return lyricNumberAttribute;
+            }
+            const sourceVerseNumber: string = lyricNumberAttribute || "1";
+            return `${sourceVerseNumber}translation`;
+        }
         if (lyricVerseName && !lyricNumberAttribute) {
             return lyricVerseName;
         }

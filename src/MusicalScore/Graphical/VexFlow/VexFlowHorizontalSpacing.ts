@@ -17,6 +17,7 @@ import { Staff } from "../../VoiceData/Staff";
 import { Note as SourceNote } from "../../VoiceData/Note";
 import { SourceMeasure } from "../../VoiceData/SourceMeasure";
 import {
+  compareLyricVerseIdentifiers,
   LyricAlignmentMode,
   LyricExtendType,
 } from "../../VoiceData/Lyrics/LyricsEntry";
@@ -1927,7 +1928,8 @@ function calculateRenderedLyricRows(
     for (const entry of entries) {
       relevantVerseNumbers.set(entry.LyricsEntry.VerseNumber, entry.LyricsEntry.IsChorus);
     }
-    const verseNumbers: string[] = [...staff.ParentInstrument.LyricVersesNumbers].sort();
+    const verseNumbers: string[] = [...staff.ParentInstrument.LyricVersesNumbers]
+      .sort(compareLyricVerseIdentifiers);
     const chorusVerseNumbers: string[] = verseNumbers.filter(
       (verseNumber: string): boolean => relevantVerseNumbers.get(verseNumber) === true,
     );

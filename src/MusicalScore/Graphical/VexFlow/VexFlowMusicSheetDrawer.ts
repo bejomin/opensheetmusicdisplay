@@ -770,12 +770,35 @@ export class VexFlowMusicSheetDrawer extends MusicSheetDrawer {
         lyricEntries.forEach(lyricsEntry => {
             const label: GraphicalLabel = lyricsEntry.GraphicalLabel;
             label.Label.colorDefault = this.rules.DefaultColorLyrics;
+            const stanzaNumberLabel: GraphicalLabel = lyricsEntry.GraphicalStanzaNumberLabel;
+            if (stanzaNumberLabel) {
+                stanzaNumberLabel.Label.colorDefault = this.rules.DefaultColorLyrics;
+                stanzaNumberLabel.SVGNode = this.drawLabel(stanzaNumberLabel, layer);
+                (stanzaNumberLabel.SVGNode as SVGGElement)?.classList.add("lyrics", "lyric-stanza-number");
+                this.setLyricSvgMetadata(stanzaNumberLabel.SVGNode, lyricsEntry, "number");
+            }
             label.SVGNode = this.drawLabel(label, layer);
             (label.SVGNode as SVGGElement)?.classList.add("lyrics");
-            (label.SVGNode as Element)?.setAttribute?.(
-                "data-osmd-lyric-line", label.LyricLineIdentity,
-            );
+            this.setLyricSvgMetadata(label.SVGNode, lyricsEntry, "body");
         });
+    }
+
+    private setLyricSvgMetadata(
+        node: Node,
+        lyricsEntry: GraphicalLyricEntry,
+        content: "body" | "number",
+    ): void {
+        const element: Element = node as Element;
+        if (!element?.setAttribute) {
+            return;
+        }
+        const staffLine: StaffLine = lyricsEntry.StaffEntryParent.parentMeasure.ParentStaffLine;
+        element.setAttribute("data-osmd-lyric-line", lyricsEntry.getLineIdentity());
+        element.setAttribute("data-osmd-lyric-family", lyricsEntry.getFamilyIdentity());
+        element.setAttribute("data-osmd-lyric-role", lyricsEntry.getLyricRole());
+        element.setAttribute("data-osmd-lyric-content", content);
+        element.setAttribute("data-osmd-lyric-system", String(staffLine?.ParentMusicSystem?.Id ?? 0));
+        element.setAttribute("data-osmd-lyric-staff", String(staffLine?.ParentStaff?.idInMusicSheet ?? 0));
     }
 
     protected drawInstrumentBrace(brace: GraphicalObject, system: MusicSystem): void {

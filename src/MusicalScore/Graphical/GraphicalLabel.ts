@@ -32,6 +32,10 @@ export class GraphicalLabel extends Clickable {
     public SVGNode: Node;
     /** Stable identity shared by a lyric label and its generated connectors. */
     public LyricLineIdentity: string;
+    /** Stable identity shared by a source lyric and any translated rows. */
+    public LyricFamilyIdentity: string;
+    /** Whether this label contains source-language or translated lyric text. */
+    public LyricRole: "source" | "translation";
     /** Read-only informational variable only set once by lyrics centering algorithm. */
     public CenteringXShift: number = 0;
     public ColorXML: string;

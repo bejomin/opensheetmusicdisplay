@@ -306,6 +306,8 @@ export class EngravingRules {
      *  Default 1.0 (regular note 1.2). */
     public LyricsXPaddingReductionForLastNoteInMeasureCrossMeasureMidWord: number;
     public VerticalBetweenLyricsDistance: number;
+    /** Horizontal gap between a right-aligned stanza number column and lyric text. */
+    public LyricsStanzaNumberGap: number;
     public HorizontalBetweenLyricsDistance: number;
     public BetweenSyllableMaximumDistance: number;
     public BetweenSyllableMinimumDistance: number;
@@ -971,6 +973,7 @@ export class EngravingRules {
         // 1.0 avoids too much padding/measure width e.g. in Schubert measure 9 end, Mozart Veilchen measure 18 and 19 end
 
         this.VerticalBetweenLyricsDistance = 0.5;
+        this.LyricsStanzaNumberGap = 0.3;
         this.HorizontalBetweenLyricsDistance = 0.2;
         this.BetweenSyllableMaximumDistance = 10.0;
         this.BetweenSyllableMinimumDistance = 0.5; // + 1.0 for CenterAlignment added in lyrics spacing

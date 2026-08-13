@@ -3,6 +3,7 @@ import { expect } from "chai";
 import { PointF2D } from "../../../../src/Common/DataObjects/PointF2D";
 import { IXmlElement } from "../../../../src/Common/FileIO/Xml";
 import { TextAlignmentEnum } from "../../../../src/Common/Enums/TextAlignment";
+import { FontStyles } from "../../../../src/Common/Enums/FontStyles";
 import {
     GraphicalLyricEntry,
     LyricFootprint,
@@ -16,6 +17,7 @@ import { MusicSheet } from "../../../../src/MusicalScore/MusicSheet";
 import { MusicSheetReader } from "../../../../src/MusicalScore/ScoreIO/MusicSheetReader";
 import {
     LyricAlignmentMode,
+    compareLyricVerseIdentifiers,
     LyricExtendType,
     LyricsEntry,
     LyricSyllabic,
@@ -140,6 +142,39 @@ describe("LyricsReader semantics", () => {
         expect(melismaticPrefix.LyricText).to.equal("Held");
     });
 
+    it("groups source, translated, and chorus rows with stable semantic identities", (): void => {
+        const source: LyricsEntry = new LyricsEntry("Sing", "1", undefined, undefined);
+        const translation: LyricsEntry = new LyricsEntry(
+            "Singe",
+            "1translation",
+            undefined,
+            undefined,
+            -1,
+            "verse-translation",
+        );
+        const chorusTranslation: LyricsEntry = new LyricsEntry(
+            "Refrain",
+            "chorustranslation",
+            undefined,
+            undefined,
+            -1,
+            "chorus-translation",
+        );
+
+        expect(source.LyricFamilyIdentity).to.equal("verse:1");
+        expect(source.LyricRole).to.equal("source");
+        expect(translation.LyricFamilyIdentity).to.equal("verse:1");
+        expect(translation.LyricLineIdentity).to.equal("translation:1translation");
+        expect(translation.LyricRole).to.equal("translation");
+        expect(translation.FontStyle).to.equal(FontStyles.Italic);
+        expect(chorusTranslation.LyricFamilyIdentity).to.equal("chorus:chorus");
+        expect(chorusTranslation.IsChorus).to.be.true;
+        expect(
+            ["10translation", "2", "10", "2translation", "chorustranslation", "chorus"]
+                .sort(compareLyricVerseIdentifiers),
+        ).to.deep.equal(["2", "2translation", "10", "10translation", "chorus", "chorustranslation"]);
+    });
+
     describe("graphical lyric anchoring", () => {
         let previousTextMeasurer: ITextMeasurer;
 
@@ -196,11 +231,35 @@ describe("LyricsReader semantics", () => {
             expect(ordinary.GraphicalLabel.SvgTextAnchor).to.equal("middle");
             expect(ordinaryFull.leftEdgeX).to.be.lessThan(ordinaryBody.leftEdgeX);
             expect(ordinaryFull.rightEdgeX).to.equal(ordinaryBody.rightEdgeX);
+            expect(ordinary.GraphicalStanzaNumberLabel.SvgTextAnchor).to.equal("end");
             expect(melismaticBody.anchorX).to.equal(10);
             expect(melismaticBody.leftEdgeX).to.equal(10);
             expect(melismatic.GraphicalLabel.SvgTextAnchor).to.equal("start");
             expect(melismaticFull.leftEdgeX).to.be.lessThan(10);
             expect(melismaticFull.rightEdgeX).to.equal(melismaticBody.rightEdgeX);
+        });
+
+        it("right-aligns different-width stanza numbers without moving lyric bodies", (): void => {
+            const first: GraphicalLyricEntry = graphicalEntry(lyricAt(0, "2"));
+            const tenth: GraphicalLyricEntry = graphicalEntry(lyricAt(0, "3"));
+            const firstBodyBefore: LyricFootprint = first.getBodyFootprint(2);
+            const tenthBodyBefore: LyricFootprint = tenth.getBodyFootprint(8);
+            first.setDisplayStanzaNumberPrefix("1. ");
+            tenth.setDisplayStanzaNumberPrefix("10. ");
+
+            first.setStanzaNumberColumnRight(1.5, 2);
+            tenth.setStanzaNumberColumnRight(1.5, 8);
+
+            expect(
+                2 + first.GraphicalStanzaNumberLabel.PositionAndShape.RelativePosition.x +
+                first.GraphicalStanzaNumberLabel.PositionAndShape.BorderRight,
+            ).to.equal(1.5);
+            expect(
+                8 + tenth.GraphicalStanzaNumberLabel.PositionAndShape.RelativePosition.x +
+                tenth.GraphicalStanzaNumberLabel.PositionAndShape.BorderRight,
+            ).to.equal(1.5);
+            expect(first.getBodyFootprint(2)).to.deep.equal(firstBodyBefore);
+            expect(tenth.getBodyFootprint(8)).to.deep.equal(tenthBodyBefore);
         });
 
         it("lays out a typed start/continue/stop chain as one extender", (): void => {
