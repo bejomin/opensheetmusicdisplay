@@ -128,9 +128,7 @@ function linkedTrajectory(inputs: readonly SlurLinkedLayoutInput[]): SlurLinkedT
     : sourceSemanticHeight;
   const sourcePitch: number | undefined = first?.context.start.pitchHalfTone;
   const destinationPitch: number | undefined = last?.context.end.pitchHalfTone;
-  const crossesStaves: boolean = inputs.some((input): boolean => input.context.isCrossStaff);
   if (
-    crossesStaves &&
     Number.isFinite(sourcePitch) &&
     Number.isFinite(destinationPitch) &&
     Math.abs(destinationPitch - sourcePitch) > 0.001
@@ -138,9 +136,9 @@ function linkedTrajectory(inputs: readonly SlurLinkedLayoutInput[]): SlurLinkedT
     const pitchDirection: number = -Math.sign(destinationPitch - sourcePitch);
     const renderedDirection: number = Math.sign(destinationSemanticHeight - sourceSemanticHeight);
     if (renderedDirection !== pitchDirection) {
-      // Cross-system endpoint boxes can still be expressed in the host
-      // staff's coordinates before the final cross-staff translation. Pitch
-      // supplies the stable musical direction when those local frames disagree.
+      // Cross-system endpoint boxes can be expressed in different local staff
+      // frames. Pitch supplies the stable musical direction when those frames
+      // disagree, irrespective of how the caller classified the staff change.
       const minimumPitchTravel: number = Math.min(
         5,
         Math.max(1.2, Math.abs(destinationPitch - sourcePitch) * 0.25),

@@ -221,11 +221,9 @@ describe("linked slur layout engine", (): void => {
     )).to.equal(true);
   });
 
-  it("uses endpoint pitches when cross-staff coordinate frames disagree", (): void => {
+  it("uses endpoint pitches when cross-system coordinate frames disagree", (): void => {
     const first: SlurLinkedLayoutInput = input(0, false, true);
     const second: SlurLinkedLayoutInput = input(1, true, false);
-    first.context.isCrossStaff = true;
-    second.context.isCrossStaff = true;
     first.context.start.pitchHalfTone = 36;
     second.context.end.pitchHalfTone = 55;
     first.staffOffsetY = 0;
