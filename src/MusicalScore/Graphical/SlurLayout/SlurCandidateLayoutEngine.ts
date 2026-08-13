@@ -71,6 +71,32 @@ const cloneGeometry: (geometry: SlurCurveGeometry) => SlurCurveGeometry = (
   p3: clonePoint(geometry.p3),
 });
 
+function ledgerLineIsOnSlurSide(
+  context: SlurLayoutContext,
+  endpoint: SlurEndpointContext,
+  obstacle: SlurObstacle,
+): boolean {
+  if (!endpoint.notehead || obstacle.type !== "ledger-line") {
+    return false;
+  }
+  const tolerance: number = 0.05;
+  return context.direction === PlacementEnum.Above
+    ? obstacle.bounds.top <= endpoint.notehead.top + tolerance
+    : obstacle.bounds.bottom >= endpoint.notehead.bottom - tolerance;
+}
+
+function endpointLedgerLinesOnSlurSide(
+  context: SlurLayoutContext,
+  endpoint: SlurEndpointContext,
+  side: "start" | "end",
+): SlurObstacle[] {
+  return context.obstacles.filter(
+    (obstacle): boolean =>
+      (obstacle.endpoint === side || obstacle.endpoint === "both") &&
+      ledgerLineIsOnSlurSide(context, endpoint, obstacle),
+  );
+}
+
 export function pointOnSlurCurve(geometry: SlurCurveGeometry, t: number): PointF2D {
   const inverse: number = 1 - t;
   const inverseSquared: number = inverse * inverse;
@@ -110,6 +136,7 @@ function makeAnchor(
     type,
     side,
     direction: context.direction,
+    preferredTangent: endpoint.preferredTangent,
     penalties: {
       displacement,
       articulationRelationship:
@@ -149,7 +176,7 @@ export function generateSlurAnchors(
     let generationIndex: number = 0;
     const direction: number = context.direction === PlacementEnum.Above ? -1 : 1;
     const returnsAcrossSystems: boolean =
-      context.isCrossStaff && context.isCrossSystem && side === "end" && context.start.systemBoundary;
+      context.isCrossSystem && side === "end" && context.start.systemBoundary;
     const noteheadCenterX: number | undefined = endpoint.notehead
       ? (endpoint.notehead.left + endpoint.notehead.right) / 2
       : undefined;
@@ -230,10 +257,7 @@ export function generateSlurAnchors(
         ),
       );
       const endpointLedgerLines: SlurObstacle[] = endpoint.chordSize <= 1
-        ? context.obstacles.filter(
-          (obstacle): boolean => obstacle.type === "ledger-line" &&
-            (obstacle.endpoint === side || obstacle.endpoint === "both"),
-        )
+        ? endpointLedgerLinesOnSlurSide(context, endpoint, side)
         : [];
       const endpointOuterBounds: SlurBounds[] = [
         endpoint.notehead,
@@ -480,12 +504,18 @@ function compactReferenceSpan(
   return Math.abs(endX - startX);
 }
 
-function requiredObstacleBow(
+interface ObstacleBowConstraint {
+  ratio: number;
+  requiredOffset: number;
+  notationObstacle: boolean;
+}
+
+function obstacleBowConstraints(
   context: SlurLayoutContext,
   start: {x: number, y: number},
   end: {x: number, y: number},
-): number {
-  let required: number = 0;
+): ObstacleBowConstraint[] {
+  const constraints: ObstacleBowConstraint[] = [];
   const middleX: number = (start.x + end.x) / 2;
   const middleBaseline: number = lineY(start, end, middleX);
   if (compactReferenceSpan(context, start, end) >= compactInStaffSpan) {
@@ -493,12 +523,13 @@ function requiredObstacleBow(
     const staffEdgeBow: number = context.direction === PlacementEnum.Above
       ? middleBaseline - (context.envelope.topLineOffset - staffEdgeClearance)
       : context.envelope.bottomLineOffset + staffEdgeClearance - middleBaseline;
-    // At t=0.5, equal cubic controls contribute 0.75 of their bow. This gives
-    // a phrase-length high family a genuine route outside the staff while
-    // retaining its notehead attachments. A clear adjacent-note slur may
-    // remain within the staff; forcing it around the staff edge makes it much
-    // larger than the gesture it describes.
-    required = Math.max(required, staffEdgeBow / 0.75);
+    // A phrase-length high family needs a genuine route outside the staff
+    // while retaining its notehead attachments. A clear adjacent-note slur
+    // may remain within the staff; forcing it around the staff edge makes it
+    // much larger than the gesture it describes.
+    if (staffEdgeBow > 0) {
+      constraints.push({ratio: 0.5, requiredOffset: staffEdgeBow, notationObstacle: false});
+    }
   }
   for (const obstacle of context.obstacles) {
     if (!isForbiddenObstacle(obstacle)) {
@@ -562,11 +593,94 @@ function requiredObstacleBow(
       const neededAtX: number = context.direction === PlacementEnum.Above
         ? baseline - (obstacleTop - obstacle.clearance)
         : obstacleBottom + obstacle.clearance - baseline;
-      const cubicControlInfluence: number = Math.max(0.04, 3 * t * (1 - t));
-      required = Math.max(required, neededAtX / cubicControlInfluence);
+      if (neededAtX > 0) {
+        constraints.push({ratio: t, requiredOffset: neededAtX, notationObstacle: true});
+      }
     }
   }
+  return constraints;
+}
+
+function requiredObstacleBow(
+  context: SlurLayoutContext,
+  start: {x: number, y: number},
+  end: {x: number, y: number},
+): number {
+  let required: number = 0;
+  for (const constraint of obstacleBowConstraints(context, start, end)) {
+    const t: number = constraint.ratio;
+    const cubicControlInfluence: number = Math.max(0.04, 3 * t * (1 - t));
+    required = Math.max(required, constraint.requiredOffset / cubicControlInfluence);
+  }
   return Math.max(0, required);
+}
+
+function requiredObstacleControlBows(
+  context: SlurLayoutContext,
+  start: {x: number, y: number},
+  end: {x: number, y: number},
+  minimumBow: number,
+): {start: number, end: number} {
+  let startBow: number = minimumBow;
+  let endBow: number = minimumBow;
+  const constraints: ObstacleBowConstraint[] = obstacleBowConstraints(context, start, end);
+  // Project the two control heights onto every sampled clearance constraint.
+  // This retains a balanced crown for a flat obstacle profile, but lets an
+  // obstruction concentrated near one endpoint increase only the control
+  // point that can clear it efficiently. Repeating the deterministic pass
+  // converges after nearby constraints have adjusted one another.
+  for (let iteration: number = 0; iteration < 8; iteration++) {
+    let changed: boolean = false;
+    for (const constraint of constraints) {
+      const t: number = constraint.ratio;
+      const startInfluence: number = 3 * (1 - t) * (1 - t) * t;
+      const endInfluence: number = 3 * (1 - t) * t * t;
+      const deficit: number = constraint.requiredOffset -
+        (startInfluence * startBow + endInfluence * endBow);
+      if (deficit <= 0.0001) {
+        continue;
+      }
+      const squaredInfluence: number =
+        startInfluence * startInfluence + endInfluence * endInfluence;
+      if (squaredInfluence <= 0.000001) {
+        continue;
+      }
+      startBow += deficit * startInfluence / squaredInfluence;
+      endBow += deficit * endInfluence / squaredInfluence;
+      changed = true;
+    }
+    if (!changed) {
+      break;
+    }
+  }
+  return {start: startBow, end: endBow};
+}
+
+function boundaryHasNotationPressure(
+  context: SlurLayoutContext,
+  start: {x: number, y: number},
+  end: {x: number, y: number},
+  side: "start" | "end",
+): boolean {
+  const sampledPressure: boolean = obstacleBowConstraints(context, start, end).some(
+    (constraint): boolean => constraint.notationObstacle &&
+      (side === "start" ? constraint.ratio <= 0.55 : constraint.ratio >= 0.45),
+  );
+  if (sampledPressure) {
+    return true;
+  }
+  // A beam can already lie just inside a stem-tip baseline and therefore need
+  // no additional sampled clearance, while still requiring both controls to
+  // remain on the slur side for a one-piece arch. Treat real notation in the
+  // boundary half as contour pressure; empty system-break fragments retain
+  // their exact linked tangent.
+  const midpoint: number = (start.x + end.x) / 2;
+  return context.obstacles.some((obstacle): boolean =>
+    isForbiddenObstacle(obstacle) &&
+    obstacle.bounds.right >= Math.min(start.x, end.x) &&
+    obstacle.bounds.left <= Math.max(start.x, end.x) &&
+    (side === "start" ? obstacle.bounds.left <= midpoint : obstacle.bounds.right >= midpoint),
+  );
 }
 
 function isUnobstructedCompactCurve(
@@ -578,6 +692,27 @@ function isUnobstructedCompactCurve(
     context.end.articulations.length === 0 &&
     compactReferenceSpan(context, start, end) < compactInStaffSpan &&
     requiredObstacleBow(context, start, end) <= 0.001;
+}
+
+function feasibleBoundaryTangent(
+  context: SlurLayoutContext,
+  side: "start" | "end",
+  preferred: number,
+  start: SlurAnchorCandidate,
+  end: SlurAnchorCandidate,
+): number {
+  if (context.start.systemBoundary && context.end.systemBoundary) {
+    return preferred;
+  }
+  const chordSlope: number = (end.y - start.y) / Math.max(0.001, end.x - start.x);
+  if (context.direction === PlacementEnum.Above) {
+    return side === "start"
+      ? Math.min(preferred, chordSlope)
+      : Math.max(preferred, chordSlope);
+  }
+  return side === "start"
+    ? Math.max(preferred, chordSlope)
+    : Math.min(preferred, chordSlope);
 }
 
 function familyGeometry(
@@ -595,7 +730,7 @@ function familyGeometry(
     Math.abs(start.y - seed.p0.y) < 0.0001 &&
     Math.abs(end.x - seed.p3.x) < 0.0001 &&
     Math.abs(end.y - seed.p3.y) < 0.0001 &&
-    !context.isCrossStaff
+    (!context.isCrossStaff || context.isCrossSystem)
   ) {
     return cloneGeometry(seed);
   }
@@ -604,16 +739,38 @@ function familyGeometry(
     const p0: PointF2D = new PointF2D(start.x, start.y);
     const p3: PointF2D = new PointF2D(end.x, end.y);
     if (context.start.systemBoundary && context.end.systemBoundary) {
+      const middleStartTangent: number = start.preferredTangent ?? 0;
+      const middleEndTangent: number = end.preferredTangent ?? middleStartTangent;
       return {
         p0,
-        p1: new PointF2D(start.x + width / 3, start.y),
-        p2: new PointF2D(start.x + width * 2 / 3, end.y),
+        p1: new PointF2D(start.x + width / 3, start.y + middleStartTangent * width / 3),
+        p2: new PointF2D(end.x - width / 3, end.y - middleEndTangent * width / 3),
         p3,
       };
     }
+    const startTangent: number = feasibleBoundaryTangent(
+      context,
+      "start",
+      start.preferredTangent ?? 0,
+      start,
+      end,
+    );
+    const endTangent: number = feasibleBoundaryTangent(
+      context,
+      "end",
+      end.preferredTangent ?? 0,
+      start,
+      end,
+    );
     const control: PointF2D = context.start.systemBoundary
-      ? new PointF2D(start.x + width * 0.35, start.y)
-      : new PointF2D(start.x + width * 0.65, end.y);
+      ? new PointF2D(
+        start.x + width * 0.35,
+        start.y + startTangent * width * 0.35,
+      )
+      : new PointF2D(
+        start.x + width * 0.65,
+        end.y - endTangent * width * 0.35,
+      );
     return {
       p0,
       p1: new PointF2D(
@@ -696,20 +853,27 @@ function familyGeometry(
       Math.min(2, 0.9 + Math.abs(end.y - start.y) * 0.12),
     );
   }
+  let startBow: number = minimumBow;
+  let endBow: number = minimumBow;
   if (family === "high") {
     // The ordinary skyline seed can remain inside a dense beam, tuplet, grace
     // cluster, or an already-selected inner slur. Reserve the high family as a
     // deterministic obstacle-routed alternative rather than merely scaling the
     // same insufficient bow by a fixed percentage.
-    minimumBow = Math.max(
+    const routedBows: {start: number, end: number} = requiredObstacleControlBows(
+      context,
+      start,
+      end,
       minimumBow,
-      requiredObstacleBow(context, start, end) * 1.08,
     );
+    startBow = routedBows.start * 1.08;
+    endBow = routedBows.end * 1.08;
   }
   // The exact geometry seed is retained above as one candidate. Regenerated
   // semantic endpoint routes derive their bow from the selected anchors and
   // typed obstacles instead of reproducing a remote notehead route.
-  let commonBow: number = minimumBow * direction;
+  let startControlBow: number = startBow * direction;
+  let endControlBow: number = endBow * direction;
   if (context.isCrossStaff) {
     // `commonBow` is applied on the screen's y axis. For a steep cross-staff
     // phrase that represents only a fraction of the visible, perpendicular
@@ -721,7 +885,8 @@ function familyGeometry(
       1.75,
       Math.hypot(width, end.y - start.y) / Math.max(0.001, Math.abs(width)),
     );
-    commonBow *= perpendicularProjection;
+    startControlBow *= perpendicularProjection;
+    endControlBow *= perpendicularProjection;
   }
   if (
     Math.abs(width) < 10 &&
@@ -737,8 +902,13 @@ function familyGeometry(
     // steep, preserving asymmetric contours that already leave both notes
     // cleanly.
     const baselineSlope: number = (end.y - start.y) / width;
-    const effectiveBow: number = commonBow * heightFactor;
-    const maximumControlRun: number = Math.abs(width) * 0.44;
+    const effectiveStartBow: number = startControlBow * heightFactor;
+    const effectiveEndBow: number = endControlBow * heightFactor;
+    // An independently routed high control can carry more bow than its mate.
+    // Let that arm reach the midpoint when necessary; the paired controls can
+    // meet there without reversing their x order. Ordinary families retain a
+    // little more crown width.
+    const maximumControlRun: number = Math.abs(width) * (family === "high" ? 0.5 : 0.44);
     const maximumEndpointSlope: number = 2.1;
     const widenControlRun: (initialRun: number, bowOffset: number) => number =
       (initialRun, bowOffset): number => {
@@ -767,18 +937,51 @@ function familyGeometry(
         return upper;
       };
     const horizontalDirection: number = Math.sign(width);
-    const startRun: number = widenControlRun(Math.abs(p1x - start.x), effectiveBow);
-    const endRun: number = widenControlRun(Math.abs(end.x - p2x), -effectiveBow);
+    const startRun: number = widenControlRun(Math.abs(p1x - start.x), effectiveStartBow);
+    const endRun: number = widenControlRun(Math.abs(end.x - p2x), -effectiveEndBow);
     p1x = start.x + horizontalDirection * startRun;
     p2x = end.x - horizontalDirection * endRun;
   }
-  const p1: PointF2D = new PointF2D(p1x, lineY(start, end, p1x) + commonBow * heightFactor);
-  const p2: PointF2D = new PointF2D(p2x, lineY(start, end, p2x) + commonBow * heightFactor);
+  const p1: PointF2D = new PointF2D(
+    p1x,
+    lineY(start, end, p1x) + startControlBow * heightFactor,
+  );
+  const p2: PointF2D = new PointF2D(
+    p2x,
+    lineY(start, end, p2x) + endControlBow * heightFactor,
+  );
   if (context.start.systemBoundary) {
-    p1.y = start.y;
+    const tangent: number = feasibleBoundaryTangent(
+      context,
+      "start",
+      start.preferredTangent ?? 0,
+      start,
+      end,
+    );
+    const tangentY: number = start.y + tangent * (p1.x - start.x);
+    // A boundary tangent is a continuity preference, not permission to pull
+    // an obstacle-routed control back through a beam. Retain whichever value
+    // lies farther on the slur side.
+    p1.y = boundaryHasNotationPressure(context, start, end, "start")
+      ? context.direction === PlacementEnum.Above
+        ? Math.min(p1.y, tangentY)
+        : Math.max(p1.y, tangentY)
+      : tangentY;
   }
   if (context.end.systemBoundary) {
-    p2.y = end.y;
+    const tangent: number = feasibleBoundaryTangent(
+      context,
+      "end",
+      end.preferredTangent ?? 0,
+      start,
+      end,
+    );
+    const tangentY: number = end.y - tangent * (end.x - p2.x);
+    p2.y = boundaryHasNotationPressure(context, start, end, "end")
+      ? context.direction === PlacementEnum.Above
+        ? Math.min(p2.y, tangentY)
+        : Math.max(p2.y, tangentY)
+      : tangentY;
   }
   return {
     p0: new PointF2D(start.x, start.y),
@@ -1177,7 +1380,6 @@ function scoreCandidate(
       }
       if (
         anchor.side === "end" &&
-        context.isCrossStaff &&
         context.isCrossSystem &&
         context.start.systemBoundary &&
         (anchor.type === "beam-side" || anchor.type === "stem-tip")
@@ -1187,10 +1389,11 @@ function scoreCandidate(
         // beam or stem does not pull the returning segment into a steep hook.
         penalty += 5;
       }
-      const hasEndpointLedger: boolean = context.obstacles.some(
-        (obstacle): boolean => obstacle.type === "ledger-line" &&
-          (obstacle.endpoint === anchor.side || obstacle.endpoint === "both"),
-      );
+      const hasEndpointLedger: boolean = endpointLedgerLinesOnSlurSide(
+        context,
+        endpoint,
+        anchor.side,
+      ).length > 0;
       if (hasEndpointLedger) {
         penalty += ["notehead", "notehead-center"].includes(anchor.type) ? 5
           : anchor.type === "outer-head" ? 2
@@ -1207,15 +1410,35 @@ function scoreCandidate(
     candidate.startAnchor.penalties.tieConflict + candidate.endAnchor.penalties.tieConflict;
   const tangent: number = Math.max(0, startSlope - 1.25) + Math.max(0, endSlope - 1.25);
   const slope: number = Math.max(0, startSlope - 2.5) + Math.max(0, endSlope - 2.5);
-  const curvature: number = Math.abs(startSlope - endSlope) * 0.08;
+  const startControlRun: number = Math.abs(candidate.geometry.p1.x - candidate.geometry.p0.x);
+  const endControlRun: number = Math.abs(candidate.geometry.p3.x - candidate.geometry.p2.x);
+  const controlRunImbalance: number = Math.abs(startControlRun - endControlRun) /
+    Math.max(0.001, Math.abs(candidate.geometry.p3.x - candidate.geometry.p0.x));
+  const contourImbalanceAllowance: number = 0.08 + Math.abs(targetApexRatio - 0.5) * 1.25;
+  const unjustifiedControlImbalance: number = Math.max(
+    0,
+    controlRunImbalance - contourImbalanceAllowance,
+  );
+  // Strongly unequal control arms make one endpoint read as a hook. Permit
+  // that asymmetry when the measured obstacle contour asks for it, otherwise
+  // prefer the balanced family even if the hook has marginally more clearance.
+  const curvature: number = Math.abs(startSlope - endSlope) * 0.08 +
+    unjustifiedControlImbalance * 16;
+  const boundarySlopeMismatch: (
+    anchor: SlurAnchorCandidate,
+    endpoint: PointF2D,
+    control: PointF2D,
+  ) => number = (anchor, endpoint, control): number => {
+    const actual: number = (control.y - endpoint.y) /
+      Math.max(0.001, control.x - endpoint.x);
+    return Math.abs(actual - (anchor.preferredTangent ?? 0));
+  };
   const systemContinuity: number =
-    (context.start.systemBoundary &&
-    Math.abs(candidate.geometry.p1.y - candidate.geometry.p0.y) > 0.05
-      ? 1
+    (context.start.systemBoundary
+      ? boundarySlopeMismatch(candidate.startAnchor, candidate.geometry.p0, candidate.geometry.p1)
       : 0) +
-    (context.end.systemBoundary &&
-    Math.abs(candidate.geometry.p3.y - candidate.geometry.p2.y) > 0.05
-      ? 1
+    (context.end.systemBoundary
+      ? boundarySlopeMismatch(candidate.endAnchor, candidate.geometry.p3, candidate.geometry.p2)
       : 0);
   const clearance: number =
     Math.max(0, options.obstacleClearance - evaluation.minimumClearance) +

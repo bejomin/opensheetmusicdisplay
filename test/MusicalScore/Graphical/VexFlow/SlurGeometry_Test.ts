@@ -185,6 +185,38 @@ function crossStaffSystemBreakScore(): string {
       </score-partwise>`;
 }
 
+function tiedChordSystemBreakScore(): string {
+   return `<?xml version="1.0" encoding="UTF-8"?>
+      <score-partwise version="4.0">
+         <part-list><score-part id="P1"><part-name>Piano LH</part-name></score-part></part-list>
+         <part id="P1">
+            <measure number="1">
+               <attributes>
+                  <divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+                  <clef><sign>F</sign><line>4</line></clef>
+               </attributes>
+               <note>
+                  <pitch><step>A</step><octave>2</octave></pitch>
+                  <duration>4</duration><voice>1</voice><type>whole</type>
+                  <notations><slur number="1" type="start" placement="above"/></notations>
+               </note>
+            </measure>
+            <measure number="2">
+               <print new-system="yes"/>
+               <note>
+                  <pitch><step>E</step><octave>3</octave></pitch>
+                  <duration>4</duration><voice>1</voice><type>whole</type><tie type="start"/>
+                  <notations><tied type="start"/><slur number="1" type="stop"/></notations>
+               </note>
+               <note><chord/><pitch><step>B</step><octave>2</octave></pitch>
+                  <duration>4</duration><voice>1</voice><type>whole</type></note>
+               <note><chord/><pitch><step>E</step><octave>2</octave></pitch>
+                  <duration>4</duration><voice>1</voice><type>whole</type></note>
+            </measure>
+         </part>
+      </score-partwise>`;
+}
+
 function ledgerEndpointScore(): string {
    return `<?xml version="1.0" encoding="UTF-8"?>
       <score-partwise version="4.0">
@@ -560,7 +592,7 @@ describe("Stage 6 slur geometry", (): void => {
       )).to.equal(true);
    });
 
-   it("links cross-system segments with shared placement and horizontal break tangents", async (): Promise<void> => {
+   it("links cross-system segments with shared placement and directional break tangents", async (): Promise<void> => {
       const osmd: OpenSheetMusicDisplay =
          TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
       await osmd.load(systemBreakScore());
@@ -582,11 +614,17 @@ describe("Stage 6 slur geometry", (): void => {
       expect(segments[0].diagnostics.linkedGroupId).to.equal(segments[1].diagnostics.linkedGroupId);
       expect(segments[0].diagnostics.continuationClearance)
          .to.equal(segments[1].diagnostics.continuationClearance);
-      expect(segments[0].diagnostics.linkedTangentMismatch).to.equal(0);
-      expect(segments[1].diagnostics.linkedTangentMismatch).to.equal(0);
+      expect(segments[0].diagnostics.linkedTangentMismatch).to.be.closeTo(0, 1e-9);
+      expect(segments[1].diagnostics.linkedTangentMismatch).to.be.closeTo(0, 1e-9);
       expect(segments.flatMap((segment) => segment.diagnostics.structuredFaults ?? [])).to.have.length(0);
-      expect(segments[0].bezierEndControlPt.y).to.be.closeTo(segments[0].bezierEndPt.y, 0.001);
-      expect(segments[1].bezierStartControlPt.y).to.be.closeTo(segments[1].bezierStartPt.y, 0.001);
+      const outgoingSlope: number =
+         (segments[0].bezierEndPt.y - segments[0].bezierEndControlPt.y) /
+         (segments[0].bezierEndPt.x - segments[0].bezierEndControlPt.x);
+      const returningSlope: number =
+         (segments[1].bezierStartControlPt.y - segments[1].bezierStartPt.y) /
+         (segments[1].bezierStartControlPt.x - segments[1].bezierStartPt.x);
+      expect(outgoingSlope).to.be.closeTo(segments[0].diagnostics.linkedContinuationSlope, 0.001);
+      expect(returningSlope).to.be.closeTo(segments[1].diagnostics.linkedContinuationSlope, 0.001);
       expect(segments[0].bezierStartPt.x).to.be.within(
          segments[0].diagnostics.startNotehead.left - 1,
          segments[0].diagnostics.startNotehead.right + 1,
@@ -616,14 +654,41 @@ describe("Stage 6 slur geometry", (): void => {
       expect(segments.flatMap((segment) => segment.diagnostics.structuredFaults ?? [])).to.have.length(0);
       expect(segments[0].diagnostics.endAttachment).to.equal("system-edge");
       expect(segments[1].diagnostics.startAttachment).to.equal("system-edge");
-      expect(segments[0].bezierEndControlPt.y).to.be.closeTo(segments[0].bezierEndPt.y, 0.001);
-      expect(segments[1].bezierStartControlPt.y).to.be.closeTo(segments[1].bezierStartPt.y, 0.001);
+      expect(segments[0].diagnostics.linkedSourceSemanticHeight)
+         .to.be.greaterThan(segments[0].diagnostics.linkedDestinationSemanticHeight);
+      expect(segments[0].diagnostics.linkedContinuationSlope).to.be.lessThan(0);
+      expect(segments[0].bezierEndPt.y).to.be.lessThan(segments[0].bezierStartPt.y);
+      expect(segments[1].bezierStartPt.y).to.be.greaterThan(segments[1].bezierEndPt.y);
       for (const segment of segments) {
          expect([segment.bezierStartPt, segment.bezierStartControlPt,
             segment.bezierEndControlPt, segment.bezierEndPt].every(
             (point): boolean => Number.isFinite(point.x) && Number.isFinite(point.y),
          )).to.equal(true);
       }
+   });
+
+   it("returns an above system-break slur to the head of a tied chord", async (): Promise<void> => {
+      const osmd: OpenSheetMusicDisplay =
+         TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+      await osmd.load(tiedChordSystemBreakScore());
+      osmd.Sheet.Rules.NewSystemAtXMLNewSystemAttribute = true;
+      osmd.updateGraphic();
+      osmd.render();
+
+      const segments: GraphicalSlur[] = allSlurs(osmd)
+         .map(({slur}) => slur)
+         .sort((left, right): number => left.diagnostics.segmentIndex - right.diagnostics.segmentIndex);
+      expect(segments).to.have.length(2);
+      expect(segments.every((segment): boolean => segment.placement === PlacementEnum.Above)).to.equal(true);
+      expect(segments[1].diagnostics.endAttachment).to.not.equal("stem-tip");
+      expect(segments[1].diagnostics.endAttachment).to.not.equal("beam-side");
+      expect(segments[1].bezierEndPt.x).to.be.within(
+         segments[1].diagnostics.endNotehead.left - 0.5,
+         segments[1].diagnostics.endNotehead.right + 0.5,
+      );
+      expect(segments[1].bezierStartControlPt.y).to.be.lessThan(segments[1].bezierStartPt.y);
+      expect(segments[1].bezierEndControlPt.y).to.be.lessThan(segments[1].bezierEndPt.y);
+      expect(segments.flatMap((segment) => segment.diagnostics.structuredFaults ?? [])).to.have.length(0);
    });
 
    for (const fixture of [

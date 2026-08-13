@@ -224,6 +224,33 @@ describe("candidate slur layout engine", (): void => {
     expect(routedBow).to.be.lessThan(seedBow * 1.5);
   });
 
+  it("concentrates obstacle-routed bow near the obstructed end", (): void => {
+    const result: SlurLayoutResult = calculateCandidateSlurLayout(
+      context({
+        obstacles: [{
+          id: "late-beam",
+          type: "beam",
+          bounds: {left: 10, right: 16, top: -2.8, bottom: -1.8},
+          clearance: 0.1,
+        }],
+      }),
+      seed,
+      options,
+    );
+    const routed: SlurCurveCandidate = result.candidates.find(
+      (candidate): boolean => candidate.family === "high" && candidate.generationIndex === 2,
+    );
+    const startBaseline: number = seed.p0.y +
+      (seed.p3.y - seed.p0.y) * ((routed.geometry.p1.x - seed.p0.x) / (seed.p3.x - seed.p0.x));
+    const endBaseline: number = seed.p0.y +
+      (seed.p3.y - seed.p0.y) * ((routed.geometry.p2.x - seed.p0.x) / (seed.p3.x - seed.p0.x));
+    const startBow: number = startBaseline - routed.geometry.p1.y;
+    const endBow: number = endBaseline - routed.geometry.p2.y;
+
+    expect(routed.rejected).to.equal(false);
+    expect(endBow).to.be.greaterThan(startBow * 1.25);
+  });
+
   it("offers a notehead crown while retaining the geometry-seed attachment candidate", (): void => {
     const anchors: {start: SlurAnchorCandidate[], end: SlurAnchorCandidate[]} = generateSlurAnchors(
       context(),
@@ -299,7 +326,8 @@ describe("candidate slur layout engine", (): void => {
     );
 
     expect(selected.startAnchor.type).to.equal("notehead-center");
-    expect(selected.endAnchor.type).to.equal("notehead-center");
+    expect(["notehead", "notehead-center"]).to.include(selected.endAnchor.type);
+    expect(selected.endAnchor.x).to.be.closeTo(8, 1e-9);
     expect(selectedBow).to.be.greaterThan(0.6);
     expect(selectedBow).to.be.lessThan(sourceBow / 2);
     expect(result.candidates.some(
@@ -469,7 +497,7 @@ describe("candidate slur layout engine", (): void => {
       obstacles: [{
         id: "end-ledger",
         type: "ledger-line",
-        bounds: {left: 17.2, right: 18.8, top: 2, bottom: 2},
+        bounds: {left: 17.2, right: 18.8, top: 1.45, bottom: 1.45},
         endpoint: "end",
         clearance: 0.12,
       }],
@@ -486,6 +514,31 @@ describe("candidate slur layout engine", (): void => {
     expect(selected.endAnchor.type).to.equal("notehead-shoulder");
     expect(selected.endAnchor.x).to.be.lessThan(16.05);
     expect(selected.endAnchor.y).to.equal(1.15);
+  });
+
+  it("does not displace an above slur for a ledger below the notehead crown", (): void => {
+    const ledgerContext: SlurLayoutContext = context({
+      obstacles: [{
+        id: "end-ledger-below-crown",
+        type: "ledger-line",
+        bounds: {left: 17.2, right: 18.8, top: 2, bottom: 2},
+        endpoint: "end",
+        clearance: 0.12,
+      }],
+    });
+    const anchors: {start: SlurAnchorCandidate[], end: SlurAnchorCandidate[]} =
+      generateSlurAnchors(ledgerContext, seed, options.obstacleClearance);
+    const shoulder: SlurAnchorCandidate = anchors.end.find(
+      (anchor): boolean => anchor.type === "notehead-shoulder",
+    );
+    const result: SlurLayoutResult = calculateCandidateSlurLayout(ledgerContext, seed, options);
+    const selected: SlurCurveCandidate = result.candidates.find(
+      (candidate): boolean => candidate.id === result.selectedCandidateId,
+    );
+
+    expect(shoulder.x).to.be.closeTo(17.42, 1e-9);
+    expect(["notehead", "notehead-center"]).to.include(selected.endAnchor.type);
+    expect(selected.endAnchor.x).to.be.closeTo(18, 1e-9);
   });
 
   it("does not offer a stem tip on the opposite side of a notehead", (): void => {
@@ -726,8 +779,8 @@ describe("candidate slur layout engine", (): void => {
       (routed.geometry.p3.x - routed.geometry.p2.x),
     );
 
-    expect(startSlope).to.be.at.most(2.11);
-    expect(endSlope).to.be.at.most(2.11);
+    expect(startSlope, JSON.stringify(routed.geometry)).to.be.at.most(2.11);
+    expect(endSlope, JSON.stringify(routed.geometry)).to.be.at.most(2.11);
   });
 
   it("places a chord endpoint shoulder outside its selected accidental", (): void => {
@@ -880,6 +933,116 @@ describe("candidate slur layout engine", (): void => {
     expect(
       result.candidates.some((candidate) => candidate.endAnchor.type === "stem-tip"),
     ).to.equal(false);
+  });
+
+  it("returns every linked continuation to its destination notehead", (): void => {
+    const boundaryStart: SlurEndpointContext = {
+      ...endpoint("start", 2),
+      systemBoundary: true,
+      seedAttachment: "system-edge",
+    };
+    const tiedChordEnd: SlurEndpointContext = {
+      ...endpoint("end", 18),
+      chordSize: 3,
+      tiedEndpoint: true,
+      seedAnchor: new PointF2D(18, -3.35),
+      seedAttachment: "stem",
+      stem: {left: 17.95, right: 18.05, top: -3, bottom: 3},
+      stemSide: true,
+    };
+    const result: SlurLayoutResult = calculateCandidateSlurLayout(
+      context({
+        start: boundaryStart,
+        end: tiedChordEnd,
+        isCrossSystem: true,
+      }),
+      {
+        p0: new PointF2D(2, -1),
+        p1: new PointF2D(6, -1),
+        p2: new PointF2D(14, -2),
+        p3: new PointF2D(18, -3.35),
+      },
+      options,
+    );
+    const selected: SlurCurveCandidate = result.candidates.find(
+      (candidate): boolean => candidate.id === result.selectedCandidateId,
+    );
+
+    expect(selected.endAnchor.type).to.not.equal("stem-tip");
+    expect(selected.endAnchor.type).to.not.equal("beam-side");
+    expect(result.candidates.some(
+      (candidate): boolean => ["stem-tip", "beam-side"].includes(candidate.endAnchor.type),
+    )).to.equal(false);
+  });
+
+  it("keeps an alternate endpoint anchor from inflecting a system exit", (): void => {
+    const stemStart: SlurEndpointContext = {
+      ...endpoint("start", 2),
+      stem: {left: 1.95, right: 2.05, top: -1, bottom: 2.5},
+      stemSide: true,
+    };
+    const boundaryEnd: SlurEndpointContext = {
+      ...endpoint("end", 18),
+      present: false,
+      notehead: undefined,
+      seedAnchor: new PointF2D(18, -1),
+      seedAttachment: "system-edge",
+      preferredTangent: -0.2,
+      systemBoundary: true,
+    };
+    const result: SlurLayoutResult = calculateCandidateSlurLayout(
+      context({start: stemStart, end: boundaryEnd, isCrossSystem: true}),
+      {
+        p0: new PointF2D(2, 1.2),
+        p1: new PointF2D(6, -1.8),
+        p2: new PointF2D(14, -1),
+        p3: new PointF2D(18, -1),
+      },
+      options,
+    );
+    const routed: SlurCurveCandidate = result.candidates.find(
+      (candidate): boolean =>
+        candidate.family === "system-continuation" &&
+        candidate.startAnchor.type === "stem-tip" &&
+        !candidate.rejected,
+    );
+    const endSlope: number = (routed.geometry.p3.y - routed.geometry.p2.y) /
+      (routed.geometry.p3.x - routed.geometry.p2.x);
+
+    expect(endSlope).to.be.at.least(-1e-9);
+  });
+
+  it("does not flatten a routed boundary control back through an obstacle", (): void => {
+    const boundaryEnd: SlurEndpointContext = {
+      ...endpoint("end", 18),
+      present: false,
+      notehead: undefined,
+      seedAnchor: new PointF2D(18, 1.2),
+      seedAttachment: "system-edge",
+      preferredTangent: 0,
+      systemBoundary: true,
+    };
+    const result: SlurLayoutResult = calculateCandidateSlurLayout(
+      context({
+        end: boundaryEnd,
+        isCrossSystem: true,
+        obstacles: [{
+          id: "beam-before-break",
+          type: "beam",
+          // Already below the endpoint baseline: it needs no extra high-family
+          // clearance, but the boundary control must still stay above it.
+          bounds: {left: 9, right: 16, top: 1.5, bottom: 2.5},
+          clearance: 0.1,
+        }],
+      }),
+      seed,
+      options,
+    );
+    const routed: SlurCurveCandidate = result.candidates.find(
+      (candidate): boolean => candidate.family === "high" && !candidate.rejected,
+    );
+
+    expect(routed.geometry.p2.y).to.be.lessThan(routed.geometry.p3.y);
   });
 
   it("does not exempt a spanning endpoint beam outside the attachment zone", (): void => {

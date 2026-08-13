@@ -11,6 +11,7 @@ import {
 import {
   SlurCurveCandidate,
   SlurCurveGeometry,
+  SlurContinuationBoundaryTarget,
   SlurEndpointContext,
   SlurLayoutContext,
 } from "../../../src/MusicalScore/Graphical/SlurLayout/SlurLayoutTypes";
@@ -95,7 +96,7 @@ function input(
 }
 
 describe("linked slur layout engine", (): void => {
-  it("uses one continuation height and horizontal break tangents", (): void => {
+  it("uses one continuation trajectory and matching break tangents", (): void => {
     const output: SlurLinkedLayoutOutput = calculateLinkedSlurLayouts(
       [input(0, false, true), input(1, true, false)],
       options,
@@ -104,9 +105,10 @@ describe("linked slur layout engine", (): void => {
     const second: SlurCurveGeometry = output.results[1].geometry;
 
     expect(output.diagnostics.continuationClearance).to.be.greaterThan(1.2);
-    expect(first.p3.y).to.equal(second.p0.y);
-    expect(first.p2.y).to.equal(first.p3.y);
-    expect(second.p1.y).to.equal(second.p0.y);
+    expect(first.p3.y).to.be.closeTo(second.p0.y, 0.1);
+    expect(output.diagnostics.continuationSlope).to.equal(0);
+    expect(first.p2.y).to.be.closeTo(first.p3.y, 1e-9);
+    expect(second.p1.y).to.be.closeTo(second.p0.y, 1e-9);
     expect(output.diagnostics.tangentMismatch).to.equal(0);
     expect(output.results.every((result) =>
       !result.candidates.find((candidate) => candidate.id === result.selectedCandidateId)?.rejected,
@@ -163,6 +165,71 @@ describe("linked slur layout engine", (): void => {
 
     expect(returningTarget).to.be.lessThan(3);
     expect(Math.abs(returningTarget - 1.15)).to.be.lessThan(Math.abs(returningTarget - 6));
+  });
+
+  it("points both cross-staff fragments along the complete rising phrase", (): void => {
+    const first: SlurLinkedLayoutInput = input(0, false, true);
+    const second: SlurLinkedLayoutInput = input(1, true, false);
+    first.context.isCrossStaff = true;
+    second.context.isCrossStaff = true;
+    first.staffOffsetY = 8;
+    second.staffOffsetY = 0;
+
+    const output: SlurLinkedLayoutOutput = calculateLinkedSlurLayouts([first, second], options);
+    const opening: SlurCurveGeometry = output.results[0].geometry;
+    const returning: SlurCurveGeometry = output.results[1].geometry;
+
+    expect(output.diagnostics.sourceSemanticHeight)
+      .to.be.greaterThan(output.diagnostics.destinationSemanticHeight);
+    expect(output.diagnostics.continuationSlope).to.be.lessThan(0);
+    expect(opening.p3.y).to.be.lessThan(opening.p0.y);
+    expect(returning.p0.y).to.be.greaterThan(returning.p3.y);
+    expect(opening.p3.y - opening.p2.y).to.be.lessThan(0);
+    expect(returning.p1.y - returning.p0.y).to.be.lessThan(0);
+    expect(output.diagnostics.boundaryTargets.every(
+      (target): boolean => target.tangent < 0 && Number.isFinite(target.projectedTarget),
+    )).to.equal(true);
+  });
+
+  it("keeps a short return close to its destination instead of making a steep hook", (): void => {
+    const first: SlurLinkedLayoutInput = input(0, false, true);
+    const second: SlurLinkedLayoutInput = input(1, true, false);
+    second.context.end.seedAnchor.x = 3.6;
+    second.context.end.notehead = {left: 3.1, right: 4.1, top: 1.5, bottom: 2.5};
+    second.seed.p3.x = 3.6;
+
+    const output: SlurLinkedLayoutOutput = calculateLinkedSlurLayouts([first, second], options);
+    const returning: SlurCurveGeometry = output.results[1].geometry;
+
+    expect(Math.abs(returning.p0.y - 1.15)).to.be.lessThan(0.9);
+    expect(Math.abs((returning.p1.y - returning.p0.y) /
+      (returning.p1.x - returning.p0.x))).to.be.lessThan(0.1);
+  });
+
+  it("relaxes an infeasible outgoing tangent instead of inflecting the fragment", (): void => {
+    const first: SlurLinkedLayoutInput = input(0, false, true);
+    const second: SlurLinkedLayoutInput = input(1, true, false);
+    first.context.start.seedAnchor.y = 1.2;
+    first.seed.p0.y = 1.2;
+    second.context.end.seedAnchor.y = -2;
+    second.context.end.notehead = {left: 17.5, right: 18.5, top: -2.5, bottom: -1.5};
+    second.seed.p3.y = -2;
+
+    const output: SlurLinkedLayoutOutput = calculateLinkedSlurLayouts([first, second], options);
+    const opening: SlurCurveGeometry = output.results[0].geometry;
+    const openingTarget: SlurContinuationBoundaryTarget = output.diagnostics.boundaryTargets.find(
+      (target): boolean => target.segmentIndex === 0 && target.side === "end",
+    );
+    const localChordSlope: number = (opening.p3.y - opening.p0.y) /
+      (opening.p3.x - opening.p0.x);
+
+    expect(openingTarget.tangent).to.be.at.least(localChordSlope - 1e-9);
+    expect(opening.p3.y - opening.p2.y).to.be.at.least(
+      localChordSlope * (opening.p3.x - opening.p2.x) - 1e-9,
+    );
+    expect(output.results[0].candidates.find(
+      (candidate): boolean => candidate.id === output.results[0].selectedCandidateId,
+    )?.rejectionReason).not.to.equal("inflected");
   });
 
   it("reports incompatible linked placement as a structured fault", (): void => {

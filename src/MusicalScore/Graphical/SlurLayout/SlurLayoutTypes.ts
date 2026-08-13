@@ -72,6 +72,8 @@ export interface SlurEndpointContext {
     /** Geometry-derived starting point retained as one scored candidate. */
     seedAnchor: PointF2D;
     seedAttachment: SlurEndpointAttachment;
+    /** Preferred dy/dx where a linked slur crosses a system boundary. */
+    preferredTangent?: number;
     tiedEndpoint: boolean;
     chordSize: number;
     grace: boolean;
@@ -145,6 +147,9 @@ export interface SlurLinkedLayoutDiagnostics {
     segmentIndexes: readonly number[];
     totalScore: number;
     tangentMismatch: number;
+    sourceSemanticHeight: number;
+    destinationSemanticHeight: number;
+    continuationSlope: number;
     boundaryTargets: readonly SlurContinuationBoundaryTarget[];
     faults: readonly SlurLayoutFault[];
 }
@@ -154,6 +159,8 @@ export interface SlurContinuationBoundaryTarget {
     side: SlurEndpointSide;
     requestedClearance: number;
     effectiveClearance: number;
+    projectedTarget: number;
+    tangent: number;
     target: number;
 }
 

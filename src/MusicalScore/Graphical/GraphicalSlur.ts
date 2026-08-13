@@ -80,6 +80,9 @@ export interface GraphicalSlurDiagnostics {
     continuationClearance?: number;
     continuationBoundaryTargets?: readonly SlurContinuationBoundaryTarget[];
     linkedTangentMismatch?: number;
+    linkedSourceSemanticHeight?: number;
+    linkedDestinationSemanticHeight?: number;
+    linkedContinuationSlope?: number;
 }
 
 interface RenderedSlurEndpointGeometry {
@@ -182,6 +185,9 @@ export class GraphicalSlur extends GraphicalCurve {
         this.diagnostics.continuationClearance = diagnostics.continuationClearance;
         this.diagnostics.continuationBoundaryTargets = [...diagnostics.boundaryTargets];
         this.diagnostics.linkedTangentMismatch = diagnostics.tangentMismatch;
+        this.diagnostics.linkedSourceSemanticHeight = diagnostics.sourceSemanticHeight;
+        this.diagnostics.linkedDestinationSemanticHeight = diagnostics.destinationSemanticHeight;
+        this.diagnostics.linkedContinuationSlope = diagnostics.continuationSlope;
         this.diagnostics.structuredFaults = [...diagnostics.faults];
     }
 
@@ -766,6 +772,7 @@ export class GraphicalSlur extends GraphicalCurve {
                 side,
                 present: Boolean(note),
                 sourceNoteId: vexflowNote?.getSVGId?.(),
+                pitchHalfTone: note?.sourceNote?.halfTone,
                 stemDirection: note?.parentVoiceEntry?.parentVoiceEntry?.StemDirection,
                 stemSide,
                 notehead,
