@@ -2913,6 +2913,7 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
 
   private calculateLinkedSlurGroup(
     linkedSegments: {segment: GraphicalSlur, staffLine: StaffLine}[],
+    forceCrossStaffContext: boolean = false,
   ): boolean {
     const sortedSegments: {segment: GraphicalSlur, staffLine: StaffLine}[] = [...linkedSegments].sort(
       (left, right): number => left.segment.diagnostics.segmentIndex - right.segment.diagnostics.segmentIndex,
@@ -2930,17 +2931,17 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
           const seed: SlurCurveGeometry = segment.getCandidateSeed();
           if (context && seed) {
             const sourceSlur: Slur = segment.slur;
-            const linkedContext: SlurLayoutContext = sourceSlur.isCrossed()
+            const linkedContext: SlurLayoutContext = forceCrossStaffContext
               ? {
                 ...context,
                 isCrossStaff: true,
                 start: {
                   ...context.start,
-                  pitchHalfTone: sourceSlur.StartNote?.halfTone,
+                  pitchHalfTone: context.start.pitchHalfTone ?? sourceSlur.StartNote?.halfTone,
                 },
                 end: {
                   ...context.end,
-                  pitchHalfTone: sourceSlur.EndNote?.halfTone,
+                  pitchHalfTone: context.end.pitchHalfTone ?? sourceSlur.EndNote?.halfTone,
                 },
               }
               : context;
@@ -3019,7 +3020,7 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
       const startLine: StaffLine = startNote?.parentVoiceEntry?.parentStaffEntry?.parentMeasure?.ParentStaffLine;
       const endLine: StaffLine = endNote?.parentVoiceEntry?.parentStaffEntry?.parentMeasure?.ParentStaffLine;
       if (startLine && endLine && startLine.ParentMusicSystem !== endLine.ParentMusicSystem) {
-        this.calculateLinkedSlurGroup(linkedSegments);
+        this.calculateLinkedSlurGroup(linkedSegments, true);
         continue;
       }
       for (const {segment} of linkedSegments) {
