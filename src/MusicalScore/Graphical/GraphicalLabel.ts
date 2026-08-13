@@ -30,6 +30,8 @@ export class GraphicalLabel extends Clickable {
      *  For the Canvas backend, this is unfortunately not possible.
      */
     public SVGNode: Node;
+    /** Stable identity shared by a lyric label and its generated connectors. */
+    public LyricLineIdentity: string;
     /** Read-only informational variable only set once by lyrics centering algorithm. */
     public CenteringXShift: number = 0;
     public ColorXML: string;

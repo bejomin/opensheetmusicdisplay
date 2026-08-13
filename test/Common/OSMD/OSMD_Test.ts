@@ -646,6 +646,18 @@ describe("OpenSheetMusicDisplay Main Export", () => {
         await osmd.load(xml);
         osmd.render();
         expect(container.querySelectorAll(".dash"), "first render hyphens").to.have.length(2);
+        expect(
+            Array.from(container.querySelectorAll(".dash")).map(
+                (dash: Element): string => dash.getAttribute("data-osmd-lyric-line"),
+            ),
+            "hyphen lyric identities",
+        ).to.have.members(["verse:1", "verse:2"]);
+        expect(
+            Array.from(container.querySelectorAll(".lyrics")).map(
+                (lyric: Element): string => lyric.getAttribute("data-osmd-lyric-line"),
+            ),
+            "lyric label identities",
+        ).to.include.members(["verse:1", "verse:2"]);
 
         osmd.updateGraphic();
         osmd.render();
@@ -727,6 +739,11 @@ describe("OpenSheetMusicDisplay Main Export", () => {
         };
         const firstGeometry: number[][] = getLineGeometry();
         expect(firstGeometry, "initial extender").to.have.length(1);
+        const firstExtender: any =
+            osmd.GraphicSheet.MusicPages[0].MusicSystems[0].StaffLines[0].LyricLines[0];
+        expect(firstExtender.LyricLineIdentity).to.equal("verse:1");
+        expect((firstExtender.SVGElement as Element)?.getAttribute("data-osmd-lyric-line"))
+            .to.equal("verse:1");
 
         osmd.render();
         expectStableVerticalGeometry(getLineGeometry(), firstGeometry, "second render extender");

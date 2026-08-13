@@ -133,6 +133,7 @@ export class GraphicalLyricEntry {
         } else if (lyricsTextAlignment === TextAlignmentEnum.LeftBottom) {
             this.graphicalLabel.SvgTextAnchor = "start";
         }
+        this.graphicalLabel.LyricLineIdentity = this.getLineIdentity();
         this.graphicalLabel.setLabelPositionAndShapeBorders(); // needed to have Size.width
     }
 

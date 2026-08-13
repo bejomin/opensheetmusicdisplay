@@ -19,6 +19,8 @@ export class GraphicalLine {
     private width: number;
     public colorHex: string; // will override styleId if not undefined
     public SVGElement: Node;
+    /** Stable identity shared by a lyric label and its generated connectors. */
+    public LyricLineIdentity: string;
 
     public get Start(): PointF2D {
         return this.start;

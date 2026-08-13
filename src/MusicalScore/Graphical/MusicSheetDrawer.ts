@@ -465,7 +465,12 @@ export abstract class MusicSheetDrawer {
                 lyricLine.Width,
             );
             absoluteLine.colorHex = lyricLine.colorHex;
-            this.drawGraphicalLine(absoluteLine, this.rules.LyricUnderscoreLineWidth, lyricLine.colorHex);
+            lyricLine.SVGElement = this.drawGraphicalLine(
+                absoluteLine, this.rules.LyricUnderscoreLineWidth, lyricLine.colorHex,
+            );
+            (lyricLine.SVGElement as Element)?.setAttribute?.(
+                "data-osmd-lyric-line", lyricLine.LyricLineIdentity,
+            );
         });
     }
 
@@ -496,6 +501,9 @@ export abstract class MusicSheetDrawer {
         lyricsDashes.forEach(dash => {
             dash.SVGNode = this.drawLabel(dash, <number>GraphicalLayers.Notes);
             (dash.SVGNode as SVGGElement)?.classList.add("dash");
+            (dash.SVGNode as Element)?.setAttribute?.(
+                "data-osmd-lyric-line", dash.LyricLineIdentity,
+            );
         });
     }
 

@@ -772,6 +772,9 @@ export class VexFlowMusicSheetDrawer extends MusicSheetDrawer {
             label.Label.colorDefault = this.rules.DefaultColorLyrics;
             label.SVGNode = this.drawLabel(label, layer);
             (label.SVGNode as SVGGElement)?.classList.add("lyrics");
+            (label.SVGNode as Element)?.setAttribute?.(
+                "data-osmd-lyric-line", label.LyricLineIdentity,
+            );
         });
     }
 
