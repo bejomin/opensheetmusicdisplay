@@ -914,28 +914,30 @@ function familyGeometry(
         ? Math.min(control.y, end.y - endpointBow)
         : Math.max(control.y, end.y + endpointBow);
     }
-    // A returning continuation uses this quadratic control for both cubic
-    // handles. If the preferred boundary tangent leaves that shared control
-    // just inside the destination, move only the degenerate far handle back
-    // to the slur side so the curve cannot arrive from beneath its notehead.
-    if (context.start.systemBoundary) {
-      const returnBow: number = Math.min(0.2, Math.max(0.03, Math.abs(width) * 0.015));
-      if (context.direction === PlacementEnum.Above && control.y >= end.y) {
-        control.y = end.y - returnBow;
-      } else if (context.direction === PlacementEnum.Below && control.y <= end.y) {
-        control.y = end.y + returnBow;
+    const startControl: PointF2D = new PointF2D(
+      start.x + (control.x - start.x) * 2 / 3,
+      start.y + (control.y - start.y) * 2 / 3,
+    );
+    const endControl: PointF2D = new PointF2D(
+      end.x + (control.x - end.x) * 2 / 3,
+      end.y + (control.y - end.y) * 2 / 3,
+    );
+    // A returning continuation normally shares one quadratic control between
+    // both cubic handles. If that puts the handle beside the real note just
+    // inside its destination, correct only that handle: the system-edge handle
+    // must retain the linked trajectory's exact tangent.
+    if (context.start.systemBoundary && context.end.tiedEndpoint && Math.abs(width) < 2) {
+      const returnBow: number = Math.min(0.15, Math.max(0.02, Math.abs(width) * 0.01));
+      if (context.direction === PlacementEnum.Above && endControl.y >= end.y) {
+        endControl.y = end.y - returnBow;
+      } else if (context.direction === PlacementEnum.Below && endControl.y <= end.y) {
+        endControl.y = end.y + returnBow;
       }
     }
     return {
       p0,
-      p1: new PointF2D(
-        start.x + (control.x - start.x) * 2 / 3,
-        start.y + (control.y - start.y) * 2 / 3,
-      ),
-      p2: new PointF2D(
-        end.x + (control.x - end.x) * 2 / 3,
-        end.y + (control.y - end.y) * 2 / 3,
-      ),
+      p1: startControl,
+      p2: endControl,
       p3,
     };
   }
