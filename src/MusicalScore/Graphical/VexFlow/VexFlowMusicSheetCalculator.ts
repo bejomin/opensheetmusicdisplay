@@ -3014,12 +3014,11 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
         }
       }
     }
-    for (const [sourceSlur, linkedSegments] of segmentsBySource) {
-      const startNote: GraphicalNote = this.rules.GNote(sourceSlur.StartNote);
-      const endNote: GraphicalNote = this.rules.GNote(sourceSlur.EndNote);
-      const startLine: StaffLine = startNote?.parentVoiceEntry?.parentStaffEntry?.parentMeasure?.ParentStaffLine;
-      const endLine: StaffLine = endNote?.parentVoiceEntry?.parentStaffEntry?.parentMeasure?.ParentStaffLine;
-      if (startLine && endLine && startLine.ParentMusicSystem !== endLine.ParentMusicSystem) {
+    for (const [, linkedSegments] of segmentsBySource) {
+      const linkedSystems: Set<MusicSystem> = new Set(
+        linkedSegments.map(({staffLine}): MusicSystem => staffLine.ParentMusicSystem),
+      );
+      if (linkedSystems.size > 1) {
         this.calculateLinkedSlurGroup(linkedSegments, true);
         continue;
       }
