@@ -2929,8 +2929,23 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
           const context: SlurLayoutContext = segment.layoutContext;
           const seed: SlurCurveGeometry = segment.getCandidateSeed();
           if (context && seed) {
+            const sourceSlur: Slur = segment.slur;
+            const linkedContext: SlurLayoutContext = sourceSlur.isCrossed()
+              ? {
+                ...context,
+                isCrossStaff: true,
+                start: {
+                  ...context.start,
+                  pitchHalfTone: sourceSlur.StartNote?.halfTone,
+                },
+                end: {
+                  ...context.end,
+                  pitchHalfTone: sourceSlur.EndNote?.halfTone,
+                },
+              }
+              : context;
             inputs.push({
-              context,
+              context: linkedContext,
               seed,
               staffOffsetY: staffLine.PositionAndShape.RelativePosition.y,
             });

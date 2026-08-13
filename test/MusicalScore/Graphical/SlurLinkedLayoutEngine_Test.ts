@@ -221,6 +221,27 @@ describe("linked slur layout engine", (): void => {
     )).to.equal(true);
   });
 
+  it("uses endpoint pitches when cross-staff coordinate frames disagree", (): void => {
+    const first: SlurLinkedLayoutInput = input(0, false, true);
+    const second: SlurLinkedLayoutInput = input(1, true, false);
+    first.context.isCrossStaff = true;
+    second.context.isCrossStaff = true;
+    first.context.start.pitchHalfTone = 36;
+    second.context.end.pitchHalfTone = 55;
+    first.staffOffsetY = 0;
+    second.staffOffsetY = 0.2;
+
+    const output: SlurLinkedLayoutOutput = calculateLinkedSlurLayouts([first, second], options);
+    const opening: SlurCurveGeometry = output.results[0].geometry;
+    const returning: SlurCurveGeometry = output.results[1].geometry;
+
+    expect(output.diagnostics.sourceSemanticHeight)
+      .to.be.greaterThan(output.diagnostics.destinationSemanticHeight);
+    expect(output.diagnostics.continuationSlope).to.be.lessThan(0);
+    expect(opening.p3.y).to.be.lessThan(opening.p0.y);
+    expect(returning.p0.y).to.be.greaterThan(returning.p3.y);
+  });
+
   it("keeps a short return close to its destination instead of making a steep hook", (): void => {
     const first: SlurLinkedLayoutInput = input(0, false, true);
     const second: SlurLinkedLayoutInput = input(1, true, false);
