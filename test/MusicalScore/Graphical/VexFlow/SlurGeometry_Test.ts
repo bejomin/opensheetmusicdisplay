@@ -232,6 +232,27 @@ function ledgerEndpointScore(): string {
       </score-partwise>`;
 }
 
+function neighbouringTieObstacleScore(): string {
+   return `<?xml version="1.0" encoding="UTF-8"?>
+      <score-partwise version="4.0">
+         <part-list><score-part id="P1"><part-name>Tie obstacle</part-name></score-part></part-list>
+         <part id="P1"><measure number="1">
+            <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+               <clef><sign>G</sign><line>2</line></clef></attributes>
+            <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice>
+               <type>half</type><tie type="start"/><notations><tied type="start"/></notations></note>
+            <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice>
+               <type>half</type><tie type="stop"/><notations><tied type="stop"/></notations></note>
+            <backup><duration>4</duration></backup>
+            <note><pitch><step>E</step><octave>5</octave></pitch><duration>2</duration><voice>2</voice>
+               <type>half</type><stem>down</stem>
+               <notations><slur number="1" type="start" placement="above"/></notations></note>
+            <note><pitch><step>G</step><octave>5</octave></pitch><duration>2</duration><voice>2</voice>
+               <type>half</type><stem>down</stem><notations><slur number="1" type="stop"/></notations></note>
+         </measure></part>
+      </score-partwise>`;
+}
+
 function multiSystemArticulationScore(): string {
    return `<?xml version="1.0" encoding="UTF-8"?>
       <score-partwise version="4.0">
@@ -590,6 +611,30 @@ describe("Stage 6 slur geometry", (): void => {
       expect(obstacles.some(
          (obstacle): boolean => obstacle.type === "ledger-line" && Boolean(obstacle.endpoint),
       )).to.equal(true);
+   });
+
+   it("normalizes complete tie obstacles to finalized notehead shoulders", async (): Promise<void> => {
+      const osmd: OpenSheetMusicDisplay =
+         TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+      await osmd.load(neighbouringTieObstacleScore());
+      osmd.updateGraphic();
+      osmd.render();
+
+      const slur: GraphicalSlur = allSlurs(osmd)[0].slur;
+      const tieObstacle: SlurObstacle = (slur as any).layoutContext.obstacles.find(
+         (obstacle: SlurObstacle): boolean => obstacle.type === "tie" && Boolean(obstacle.curve),
+      );
+      const noteheadObstacles: SlurObstacle[] = (slur as any).layoutContext.obstacles.filter(
+         (obstacle: SlurObstacle): boolean => obstacle.type === "notehead",
+      );
+
+      expect(tieObstacle).to.not.equal(undefined);
+      expect(noteheadObstacles.some((obstacle: SlurObstacle): boolean =>
+         Math.abs(obstacle.bounds.right - tieObstacle.curve.p0.x) < 0.001),
+      "the tie starts at a finalized right notehead shoulder").to.equal(true);
+      expect(noteheadObstacles.some((obstacle: SlurObstacle): boolean =>
+         Math.abs(obstacle.bounds.left - tieObstacle.curve.p3.x) < 0.001),
+      "the tie ends at a finalized left notehead shoulder").to.equal(true);
    });
 
    it("links cross-system segments with shared placement and directional break tangents", async (): Promise<void> => {

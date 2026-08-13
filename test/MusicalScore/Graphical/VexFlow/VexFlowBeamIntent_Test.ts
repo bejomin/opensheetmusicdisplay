@@ -32,6 +32,14 @@ const scoreXml: string = `<?xml version="1.0" encoding="UTF-8"?>
       <note><pitch><step>E</step><octave>3</octave></pitch><duration>1</duration><voice>1</voice><type>eighth</type><stem default-y="21">up</stem><staff>2</staff><beam number="1">continue</beam></note>
       <note><pitch><step>G</step><octave>4</octave></pitch><duration>1</duration><voice>1</voice><type>eighth</type><stem default-y="-94">down</stem><staff>1</staff><beam number="1">end</beam></note>
     </measure>
+    <measure number="3">
+      <note><pitch><step>C</step><octave>3</octave></pitch><duration>1</duration><voice>1</voice><type>eighth</type><stem default-y="32.5">up</stem><staff>2</staff><beam number="1">begin</beam></note>
+      <note><pitch><step>E</step><octave>3</octave></pitch><duration>1</duration><voice>1</voice><type>eighth</type><stem default-y="32.5">up</stem><staff>2</staff><beam number="1">continue</beam></note>
+      <note><pitch><step>G</step><octave>3</octave></pitch><duration>1</duration><voice>1</voice><type>eighth</type><stem default-y="32.5">up</stem><staff>2</staff><beam number="1">continue</beam></note>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><voice>1</voice><type>eighth</type><stem default-y="-82.5">down</stem><staff>1</staff><beam number="1">continue</beam></note>
+      <note><pitch><step>E</step><octave>4</octave></pitch><duration>1</duration><voice>1</voice><type>eighth</type><stem default-y="-82.5">down</stem><staff>1</staff><beam number="1">continue</beam></note>
+      <note><pitch><step>G</step><octave>4</octave></pitch><duration>1</duration><voice>1</voice><type>eighth</type><stem default-y="-82.5">down</stem><staff>1</staff><beam number="1">end</beam></note>
+    </measure>
   </part>
 </score-partwise>`;
 
@@ -132,6 +140,25 @@ describe("VexFlow authored and cross-staff beams", () => {
     expect(renderedBeams(rerenderedUpper), "rerender does not move or duplicate the cross-staff beam").to.have.length(0);
     expect(renderedBeams(rerenderedLower)).to.have.length(1);
     expect(renderedBeams(rerenderedLower)[0].getNotes()).to.have.length(6);
+  });
+
+  it("recognizes an authored flat cross-staff beam in staff-local coordinates", (): void => {
+    const notes: Note[] = sourceNotes(osmd, 2);
+    const beam: Beam = notes[0].NoteBeam;
+    expect(beam.HasFlatBeamHint).to.equal(true);
+
+    const lowerMeasure: VexFlowMeasure = osmd.GraphicSheet.MeasureList[2][1] as VexFlowMeasure;
+    const vfBeam: any = renderedBeams(lowerMeasure)[0];
+    expect(vfBeam).to.not.equal(undefined);
+    expect(vfBeam.renderOptions.flatBeams).to.equal(true);
+    expect(vfBeam.slope).to.equal(0);
+
+    osmd.updateGraphic();
+    osmd.render();
+    const rerenderedLower: VexFlowMeasure = osmd.GraphicSheet.MeasureList[2][1] as VexFlowMeasure;
+    const rerenderedBeam: any = renderedBeams(rerenderedLower)[0];
+    expect(rerenderedBeam.renderOptions.flatBeams).to.equal(true);
+    expect(rerenderedBeam.slope).to.equal(0);
   });
 
   it("lays a cross-staff slur out against the complete spanning notation", (): void => {

@@ -50,6 +50,7 @@ function endpoint(side: "start" | "end", x: number, boundary: boolean): SlurEndp
     seedAttachment: boundary ? "system-edge" : "notehead",
     tiedEndpoint: false,
     chordSize: boundary ? 0 : 1,
+    polyphonic: false,
     grace: false,
     systemBoundary: boundary,
   };
@@ -149,6 +150,35 @@ describe("linked slur layout engine", (): void => {
     expect(output.diagnostics.boundaryTargets).to.have.length(2);
   });
 
+  it("uses one relative clearance on both sides of a same-staff system break", (): void => {
+    const first: SlurLinkedLayoutInput = input(0, false, true, PlacementEnum.Below);
+    const second: SlurLinkedLayoutInput = input(1, true, false, PlacementEnum.Below);
+    first.context.envelope.bottomline = Array(201).fill(8.2);
+    second.context.envelope.bottomline = Array(201).fill(5.1);
+    second.context.end.articulations = [{
+      id: "tenuto",
+      glyphType: "a-",
+      classification: "duration",
+      position: 4,
+      bounds: {left: 17.7, right: 18.3, top: 2.8, bottom: 3.15},
+      outwardShift: 0,
+    }];
+
+    const output: SlurLinkedLayoutOutput = calculateLinkedSlurLayouts([first, second], options);
+    const outgoingTarget: SlurContinuationBoundaryTarget = output.diagnostics.boundaryTargets.find(
+      (target): boolean => target.segmentIndex === 0 && target.side === "end",
+    );
+    const returningTarget: SlurContinuationBoundaryTarget = output.diagnostics.boundaryTargets.find(
+      (target): boolean => target.segmentIndex === 1 && target.side === "start",
+    );
+
+    expect(returningTarget.effectiveClearance).to.equal(outgoingTarget.effectiveClearance);
+    expect(output.results[0].geometry.p3.y - first.context.envelope.bottomLineOffset)
+      .to.equal(outgoingTarget.effectiveClearance);
+    expect(output.results[1].geometry.p0.y - second.context.envelope.bottomLineOffset)
+      .to.equal(returningTarget.effectiveClearance);
+  });
+
   it("bases a returning cross-staff boundary on the destination notehead", (): void => {
     const first: SlurLinkedLayoutInput = input(0, false, true);
     const second: SlurLinkedLayoutInput = input(1, true, false);
@@ -204,6 +234,28 @@ describe("linked slur layout engine", (): void => {
     expect(Math.abs(returning.p0.y - 1.15)).to.be.lessThan(0.9);
     expect(Math.abs((returning.p1.y - returning.p0.y) /
       (returning.p1.x - returning.p0.x))).to.be.lessThan(0.1);
+  });
+
+  it("returns from outside a duration articulation into the endpoint", (): void => {
+    const first: SlurLinkedLayoutInput = input(0, false, true, PlacementEnum.Below);
+    const second: SlurLinkedLayoutInput = input(1, true, false, PlacementEnum.Below);
+    second.context.end.articulations = [{
+      id: "tenuto",
+      glyphType: "a-",
+      classification: "duration",
+      position: 4,
+      bounds: {left: 17.7, right: 18.3, top: 2.8, bottom: 3.15},
+      outwardShift: 0,
+    }];
+
+    const output: SlurLinkedLayoutOutput = calculateLinkedSlurLayouts([first, second], options);
+    const returning: SlurCurveGeometry = output.results[1].geometry;
+    const selected: SlurCurveCandidate = output.results[1].candidates.find(
+      (candidate): boolean => candidate.id === output.results[1].selectedCandidateId,
+    );
+
+    expect(selected.endAnchor.type).to.equal("outside-articulation");
+    expect(returning.p2.y).to.be.greaterThan(returning.p3.y);
   });
 
   it("relaxes an infeasible outgoing tangent instead of inflecting the fragment", (): void => {

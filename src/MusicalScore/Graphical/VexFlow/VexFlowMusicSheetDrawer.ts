@@ -744,8 +744,9 @@ export class VexFlowMusicSheetDrawer extends MusicSheetDrawer {
             : absolute.y + box.BorderBottom - totalExtent;
         const endY: number = textEdgeY + direction * (gap + thickness / 2);
         const apexY: number = endY + direction * height;
-        const left: number = absolute.x + box.BorderLeft + 0.05;
-        const right: number = absolute.x + box.BorderRight - 0.05;
+        const arcOffsets: {left: number, right: number} = entry.getSubstitutionArcHorizontalOffsets();
+        const left: number = absolute.x + arcOffsets.left;
+        const right: number = absolute.x + arcOffsets.right;
         const controlInset: number = (right - left) * 0.22;
         const outerOffset: number = direction * thickness / 2;
         const points: PointF2D[] = [

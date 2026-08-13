@@ -81,6 +81,7 @@ import {
     resolveFingeringPlacement,
 } from "./FingeringPlacement";
 import { GraphicalFingeringEntry } from "./GraphicalFingeringEntry";
+import { GraphicalSlur } from "./GraphicalSlur";
 
 /**
  * Class used to do all the calculations in a MusicSheet, which in the end populates a GraphicalMusicSheet.
@@ -1046,6 +1047,9 @@ export abstract class MusicSheetCalculator {
         // calculate Slurs
         if (!this.leadSheet && this.rules.RenderSlurs) {
             this.calculateSlurs();
+            if (this.rules.RenderFingerings) {
+                this.resolveFingeringSlurCollisions();
+            }
         }
         this.calculateGlissandi();
         //Calculate measure number skyline AFTER slurs
@@ -3535,6 +3539,17 @@ export abstract class MusicSheetCalculator {
                 group.instructions.map((instruction: TechnicalInstruction): string => instruction.value).join("\u2009"),
                 alignment,
             );
+            label.fontStyle = FontStyles.Bold;
+            if (group.isSubstitution) {
+                label.textLines = [{
+                    runs: group.instructions.flatMap(
+                        (instruction: TechnicalInstruction, index: number) => [
+                            ...(index > 0 ? [{text: "\u2009"}] : []),
+                            {text: instruction.value},
+                        ],
+                    ),
+                }];
+            }
             const gLabel: GraphicalFingeringEntry = new GraphicalFingeringEntry(
                 label,
                 this.rules.FingeringTextSize,
@@ -3579,6 +3594,123 @@ export abstract class MusicSheetCalculator {
                     start, end, gLabel.PositionAndShape.RelativePosition.y + gLabel.PositionAndShape.BorderBottom);
             }
         }
+    }
+
+    /**
+     * Fingerings establish the initial skyline before slurs are laid out. Once
+     * the final curves are known, move only a colliding fingering farther away
+     * from the staff. This preserves the selected slur while giving the label
+     * and substitution arc a small visible gap.
+     */
+    private resolveFingeringSlurCollisions(): void {
+        const minimumGap: number = 0.1;
+        const slurHalfThickness: number = 0.15;
+        const sampleCount: number = 64;
+        for (const system of this.musicSystems) {
+            for (const line of system.StaffLines) {
+                if (line.GraphicalSlurs.length === 0) {
+                    continue;
+                }
+                const skybottomcalculator: SkyBottomLineCalculator = line.SkyBottomLineCalculator;
+                for (const measure of line.Measures) {
+                    for (const gse of measure.staffEntries) {
+                        for (const fingering of gse.FingeringEntries) {
+                            const box: BoundingBox = fingering.PositionAndShape;
+                            const left: number = box.RelativePosition.x + box.BorderLeft;
+                            const right: number = box.RelativePosition.x + box.BorderRight;
+                            let currentTop: number = box.RelativePosition.y + box.BorderTop;
+                            let currentBottom: number = box.RelativePosition.y + box.BorderBottom;
+                            let outwardShift: number = 0;
+                            for (let pass: number = 0; pass <= line.GraphicalSlurs.length; pass++) {
+                                let passShift: number = 0;
+                                for (const slur of line.GraphicalSlurs) {
+                                    const curveRange: {top: number, bottom: number} =
+                                        this.slurRangeInHorizontalBand(slur, left, right, sampleCount);
+                                    if (!curveRange) {
+                                        continue;
+                                    }
+                                    const curveTop: number = curveRange.top - slurHalfThickness;
+                                    const curveBottom: number = curveRange.bottom + slurHalfThickness;
+                                    if (currentBottom < curveTop - minimumGap ||
+                                        currentTop > curveBottom + minimumGap) {
+                                        continue;
+                                    }
+                                    if (fingering.Placement === PlacementEnum.Above) {
+                                        passShift = Math.min(
+                                            passShift,
+                                            curveTop - minimumGap - currentBottom,
+                                        );
+                                    } else if (fingering.Placement === PlacementEnum.Below) {
+                                        passShift = Math.max(
+                                            passShift,
+                                            curveBottom + minimumGap - currentTop,
+                                        );
+                                    }
+                                }
+                                if (Math.abs(passShift) < 0.001) {
+                                    break;
+                                }
+                                outwardShift += passShift;
+                                currentTop += passShift;
+                                currentBottom += passShift;
+                            }
+                            if (Math.abs(outwardShift) < 0.001) {
+                                continue;
+                            }
+                            box.RelativePosition.y += outwardShift;
+                            box.calculateBoundingBox();
+                            const shiftedTop: number = box.RelativePosition.y + box.BorderTop;
+                            const shiftedBottom: number = box.RelativePosition.y + box.BorderBottom;
+                            if (fingering.Placement === PlacementEnum.Above) {
+                                skybottomcalculator.updateSkyLineInRange(left, right, shiftedTop);
+                            } else {
+                                skybottomcalculator.updateBottomLineInRange(left, right, shiftedBottom);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private slurRangeInHorizontalBand(
+        slur: GraphicalSlur,
+        left: number,
+        right: number,
+        sampleCount: number,
+    ): {top: number, bottom: number} | undefined {
+        if (!slur.bezierStartPt || !slur.bezierStartControlPt ||
+            !slur.bezierEndControlPt || !slur.bezierEndPt) {
+            return undefined;
+        }
+        const curveLeft: number = Math.min(slur.bezierStartPt.x, slur.bezierEndPt.x);
+        const curveRight: number = Math.max(slur.bezierStartPt.x, slur.bezierEndPt.x);
+        if (curveRight < left || curveLeft > right) {
+            return undefined;
+        }
+        sampleCount = Math.max(
+            sampleCount,
+            Math.min(512, Math.ceil((curveRight - curveLeft) * 10)),
+        );
+        const ys: number[] = [];
+        for (let index: number = 0; index <= sampleCount; index++) {
+            const t: number = index / sampleCount;
+            const inverse: number = 1 - t;
+            const x: number = inverse ** 3 * slur.bezierStartPt.x +
+                3 * inverse ** 2 * t * slur.bezierStartControlPt.x +
+                3 * inverse * t ** 2 * slur.bezierEndControlPt.x +
+                t ** 3 * slur.bezierEndPt.x;
+            if (x < left || x > right) {
+                continue;
+            }
+            ys.push(
+                inverse ** 3 * slur.bezierStartPt.y +
+                3 * inverse ** 2 * t * slur.bezierStartControlPt.y +
+                3 * inverse * t ** 2 * slur.bezierEndControlPt.y +
+                t ** 3 * slur.bezierEndPt.y,
+            );
+        }
+        return ys.length > 0 ? {top: Math.min(...ys), bottom: Math.max(...ys)} : undefined;
     }
 
     private optimizeRestPlacement(): void {

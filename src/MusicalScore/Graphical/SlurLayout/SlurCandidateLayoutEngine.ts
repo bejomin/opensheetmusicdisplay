@@ -16,6 +16,7 @@ import {
   SlurLayoutResult,
   SlurObstacle,
   SlurSkylineUpdate,
+  preferredSlurEndpointSurface,
 } from "./SlurLayoutTypes";
 
 export interface SlurCandidateLayoutOptions {
@@ -94,6 +95,94 @@ function endpointLedgerLinesOnSlurSide(
     (obstacle): boolean =>
       (obstacle.endpoint === side || obstacle.endpoint === "both") &&
       ledgerLineIsOnSlurSide(context, endpoint, obstacle),
+  );
+}
+
+function semanticEndpointAttachmentPenalty(
+  context: SlurLayoutContext,
+  anchor: SlurAnchorCandidate,
+): number {
+  const endpoint: SlurEndpointContext = anchor.side === "start" ? context.start : context.end;
+  let penalty: number = 0;
+  const phraseWidth: number = Math.abs(context.end.seedAnchor.x - context.start.seedAnchor.x);
+  if (anchor.type === "stem-tip" && endpoint.chordSize > 1 && phraseWidth >= 10) {
+    penalty += 2.25;
+  }
+  const preferredSurface: ReturnType<typeof preferredSlurEndpointSurface> =
+    preferredSlurEndpointSurface(endpoint);
+  const isHeadAttachment: boolean = noteheadAttachments.includes(anchor.type);
+  if (preferredSurface === "beam") {
+    penalty += anchor.type === "beam-side" ? 0
+      : ["stem", "stem-side", "stem-tip"].includes(anchor.type) ? 0.3
+        : isHeadAttachment ? 1.25 : 0;
+  } else if (preferredSurface === "stem") {
+    penalty += ["stem", "stem-side", "stem-tip"].includes(anchor.type) ? 0
+      : isHeadAttachment ? 1.85 : 0;
+  } else if (["beam-side", "stem", "stem-side", "stem-tip"].includes(anchor.type)) {
+    penalty += 1.25;
+  }
+  if (
+    anchor.type === "beam-side" &&
+    preferredSurface !== "beam" &&
+    !context.sharedEndpointBeam &&
+    !context.isCrossStaff
+  ) {
+    penalty += 0.45;
+  }
+  if (
+    anchor.side === "end" &&
+    context.isCrossSystem &&
+    context.start.systemBoundary &&
+    preferredSurface === "head" &&
+    (anchor.type === "beam-side" || anchor.type === "stem-tip")
+  ) {
+    penalty += 5;
+  }
+  const hasEndpointLedger: boolean = endpointLedgerLinesOnSlurSide(
+    context,
+    endpoint,
+    anchor.side,
+  ).length > 0;
+  if (hasEndpointLedger) {
+    penalty += ["notehead", "notehead-center"].includes(anchor.type) ? 5
+      : anchor.type === "outer-head" ? 2
+        : 0;
+  }
+  return penalty;
+}
+
+function semanticEndpointAttachmentMismatch(
+  context: SlurLayoutContext,
+  anchor: SlurAnchorCandidate,
+): number {
+  if (
+    anchor.type === "outside-articulation" ||
+    anchor.type === "voice-entry" ||
+    anchor.type === "system-edge"
+  ) {
+    return 0;
+  }
+  const endpoint: SlurEndpointContext = anchor.side === "start" ? context.start : context.end;
+  const preferredSurface: ReturnType<typeof preferredSlurEndpointSurface> =
+    preferredSlurEndpointSurface(endpoint);
+  if (preferredSurface === "beam") {
+    return Number(anchor.type !== "beam-side");
+  }
+  if (preferredSurface === "stem") {
+    return Number(!["stem", "stem-side", "stem-tip"].includes(anchor.type));
+  }
+  if (!noteheadAttachments.includes(anchor.type)) {
+    return 1;
+  }
+  const needsLateralClearance: boolean = endpoint.accidentals.length > 0 ||
+    endpointLedgerLinesOnSlurSide(context, endpoint, anchor.side).length > 0;
+  const isSameStaffSystemBreakEndpoint: boolean = !context.isCrossStaff && (
+    anchor.side === "start" ? context.end.systemBoundary : context.start.systemBoundary
+  );
+  return Number(
+    isSameStaffSystemBreakEndpoint &&
+    !needsLateralClearance &&
+    anchor.type !== "notehead-center",
   );
 }
 
@@ -177,6 +266,9 @@ export function generateSlurAnchors(
     const direction: number = context.direction === PlacementEnum.Above ? -1 : 1;
     const returnsAcrossSystems: boolean =
       context.isCrossSystem && side === "end" && context.start.systemBoundary;
+    const preferredSurface: ReturnType<typeof preferredSlurEndpointSurface> =
+      preferredSlurEndpointSurface(endpoint);
+    const allowFinalStemSurface: boolean = !returnsAcrossSystems || preferredSurface !== "head";
     const noteheadCenterX: number | undefined = endpoint.notehead
       ? (endpoint.notehead.left + endpoint.notehead.right) / 2
       : undefined;
@@ -219,7 +311,7 @@ export function generateSlurAnchors(
       !seedStemHasFinalGeometry &&
       !seedContainerHasFinalGeometry &&
       !unreliableSeedStem &&
-      !(returnsAcrossSystems && ["beam-side", "stem", "stem-side", "stem-tip"].includes(
+      !(returnsAcrossSystems && preferredSurface === "head" && ["beam-side", "stem", "stem-side", "stem-tip"].includes(
         endpoint.seedAttachment,
       ))
     ) {
@@ -314,7 +406,7 @@ export function generateSlurAnchors(
       }
     }
     if (
-      !returnsAcrossSystems &&
+      allowFinalStemSurface &&
       endpoint.stemSide &&
       (endpoint.beamSideAnchor || endpoint.beams.length > 0)
     ) {
@@ -340,7 +432,12 @@ export function generateSlurAnchors(
         ),
       );
     }
-    if (!returnsAcrossSystems && endpoint.stem && endpoint.stemSide) {
+    if (
+      allowFinalStemSurface &&
+      preferredSurface !== "beam" &&
+      endpoint.stem &&
+      endpoint.stemSide
+    ) {
       const displacement: number = Math.hypot(
         stemTipX - seedPoint.x,
         stemTipY - seedPoint.y,
@@ -459,22 +556,57 @@ function contourPressureRatio(
     return 0.5;
   }
   const pressureRatio: number = weightedRatio / totalWeight;
-  return Math.max(0.3, Math.min(0.7, 0.5 + (pressureRatio - 0.5) * 0.65));
+  const phraseSlope: number = Math.abs(
+    (end.y - start.y) / Math.max(0.001, end.x - start.x),
+  );
+  // On a diagonal phrase, shifting both controls toward the high end makes
+  // the curve look lopsided even though their independently routed vertical
+  // bows already respond to local notation. Dampen only that horizontal
+  // crown shift as the note-to-note slope grows. Cross-staff slurs retain the
+  // stronger directional contour that helps them traverse the staves.
+  const diagonalDamping: number = isSteepBroadSingleStaffPhrase(context, start, end)
+    ? Math.max(0.35, 1 - phraseSlope * 2)
+    : 1;
+  return Math.max(
+    0.3,
+    Math.min(0.7, 0.5 + (pressureRatio - 0.5) * 0.65 * diagonalDamping),
+  );
+}
+
+function isSteepBroadSingleStaffPhrase(
+  context: SlurLayoutContext,
+  start: {x: number, y: number},
+  end: {x: number, y: number},
+): boolean {
+  // Across a broad phrase, a rise of one staff unit per four horizontal units
+  // is steep enough for page-relative crown measurements to mistake the high
+  // endpoint for the curve's apex. Compact and cross-staff phrases retain
+  // their established directional contour.
+  const phraseWidth: number = Math.abs(end.x - start.x);
+  const phraseSlope: number = Math.abs(
+    (end.y - start.y) / Math.max(0.001, end.x - start.x),
+  );
+  return !context.isCrossStaff && phraseWidth >= 12 && phraseSlope >= 0.25;
 }
 
 function curveApexRatio(context: SlurLayoutContext, geometry: SlurCurveGeometry): number {
   let apexRatio: number = 0.5;
-  let apexY: number = context.direction === PlacementEnum.Above
-    ? Number.POSITIVE_INFINITY
-    : Number.NEGATIVE_INFINITY;
+  let apexMeasure: number = Number.NEGATIVE_INFINITY;
+  const outwardDirection: number = context.direction === PlacementEnum.Above ? -1 : 1;
+  const measureFromChord: boolean = isSteepBroadSingleStaffPhrase(
+    context,
+    geometry.p0,
+    geometry.p3,
+  );
   for (let sample: number = 0; sample <= 64; sample++) {
     const ratio: number = sample / 64;
     const point: PointF2D = pointOnSlurCurve(geometry, ratio);
-    const isNewApex: boolean = context.direction === PlacementEnum.Above
-      ? point.y < apexY
-      : point.y > apexY;
-    if (isNewApex) {
-      apexY = point.y;
+    const baseline: number = lineY(geometry.p0, geometry.p3, point.x);
+    const measure: number = measureFromChord
+      ? (point.y - baseline) * outwardDirection
+      : point.y * outwardDirection;
+    if (measure > apexMeasure) {
+      apexMeasure = measure;
       apexRatio = (point.x - geometry.p0.x) /
         Math.max(0.001, geometry.p3.x - geometry.p0.x);
     }
@@ -771,6 +903,17 @@ function familyGeometry(
         start.x + width * 0.65,
         end.y - endTangent * width * 0.35,
       );
+    if (context.start.systemBoundary && end.type === "outside-articulation") {
+      // A continuation returning to a duration articulation represents the
+      // outer half of the complete arch. Let it pass outside the destination
+      // before rising into the mark, instead of drawing a near-straight chord
+      // from the system edge to the note.
+      const outwardDirection: number = context.direction === PlacementEnum.Above ? -1 : 1;
+      const endpointBow: number = Math.min(1.6, Math.max(0.65, Math.abs(width) * 0.055));
+      control.y = outwardDirection < 0
+        ? Math.min(control.y, end.y - endpointBow)
+        : Math.max(control.y, end.y + endpointBow);
+    }
     return {
       p0,
       p1: new PointF2D(
@@ -1365,44 +1508,9 @@ function scoreCandidate(
     candidate.endAnchor.penalties.stemRelationship +
     acuteNoteheadPenalty(candidate.startAnchor) +
     acuteNoteheadPenalty(candidate.endAnchor);
-  const semanticEndpointPenalty: (anchor: SlurAnchorCandidate) => number =
-    (anchor): number => {
-      const endpoint: SlurEndpointContext = anchor.side === "start" ? context.start : context.end;
-      let penalty: number = 0;
-      const phraseWidth: number = Math.abs(
-        context.end.seedAnchor.x - context.start.seedAnchor.x,
-      );
-      if (anchor.type === "stem-tip" && endpoint.chordSize > 1 && phraseWidth >= 10) {
-        penalty += 2.25;
-      }
-      if (anchor.type === "beam-side" && !context.sharedEndpointBeam && !context.isCrossStaff) {
-        penalty += 0.45;
-      }
-      if (
-        anchor.side === "end" &&
-        context.isCrossSystem &&
-        context.start.systemBoundary &&
-        (anchor.type === "beam-side" || anchor.type === "stem-tip")
-      ) {
-        // A continuation returning on a new system cannot reconnect visually
-        // to the originating beam. Prefer the destination notehead so a local
-        // beam or stem does not pull the returning segment into a steep hook.
-        penalty += 5;
-      }
-      const hasEndpointLedger: boolean = endpointLedgerLinesOnSlurSide(
-        context,
-        endpoint,
-        anchor.side,
-      ).length > 0;
-      if (hasEndpointLedger) {
-        penalty += ["notehead", "notehead-center"].includes(anchor.type) ? 5
-          : anchor.type === "outer-head" ? 2
-            : 0;
-      }
-      return penalty;
-    };
   const semanticAttachment: number =
-    semanticEndpointPenalty(candidate.startAnchor) + semanticEndpointPenalty(candidate.endAnchor);
+    semanticEndpointAttachmentPenalty(context, candidate.startAnchor) +
+    semanticEndpointAttachmentPenalty(context, candidate.endAnchor);
   const articulation: number =
     candidate.startAnchor.penalties.articulationRelationship +
     candidate.endAnchor.penalties.articulationRelationship;
@@ -1649,7 +1757,9 @@ export function calculateCandidateSlurLayout(
           pair.start.penalties.stemRelationship + pair.end.penalties.stemRelationship +
           pair.start.penalties.articulationRelationship * 2 +
           pair.end.penalties.articulationRelationship * 2 +
-          pair.start.penalties.tieConflict * 2 + pair.end.penalties.tieConflict * 2;
+          pair.start.penalties.tieConflict * 2 + pair.end.penalties.tieConflict * 2 +
+          semanticEndpointAttachmentPenalty(context, pair.start) +
+          semanticEndpointAttachmentPenalty(context, pair.end);
       return penalty(left) - penalty(right)
       || Math.min(left.start.generationIndex, left.end.generationIndex)
         - Math.min(right.start.generationIndex, right.end.generationIndex)
@@ -1723,6 +1833,10 @@ export function calculateCandidateSlurLayout(
   const survivors: SlurCurveCandidate[] = candidates.filter((candidate) => !candidate.rejected);
   survivors.sort(
     (left, right) =>
+      semanticEndpointAttachmentMismatch(context, left.startAnchor) +
+        semanticEndpointAttachmentMismatch(context, left.endAnchor) -
+        semanticEndpointAttachmentMismatch(context, right.startAnchor) -
+        semanticEndpointAttachmentMismatch(context, right.endAnchor) ||
       (left.score?.total ?? Number.POSITIVE_INFINITY) -
         (right.score?.total ?? Number.POSITIVE_INFINITY) ||
       (left.score?.nearCollisionCount ?? Number.MAX_SAFE_INTEGER) -

@@ -12,6 +12,7 @@ import {
   SlurLayoutFault,
   SlurLayoutResult,
   SlurLinkedLayoutDiagnostics,
+  preferredSlurEndpointSurface,
 } from "./SlurLayoutTypes";
 
 export interface SlurLinkedLayoutInput {
@@ -97,10 +98,21 @@ function semanticEndpointLocalY(
   if (endpoint.systemBoundary) {
     return endpoint.seedAnchor.y;
   }
+  const direction: number = input.context.direction === PlacementEnum.Above ? -1 : 1;
+  const endpointGap: number = 0.35;
+  const preferredSurface: ReturnType<typeof preferredSlurEndpointSurface> =
+    preferredSlurEndpointSurface(endpoint);
+  if (preferredSurface === "beam" && (endpoint.beamSideAnchor || endpoint.beams.length > 0)) {
+    const beamEdge: number = endpoint.beamSideAnchor?.y ?? (direction < 0
+      ? Math.min(...endpoint.beams.map((beam): number => beam.top))
+      : Math.max(...endpoint.beams.map((beam): number => beam.bottom)));
+    return beamEdge + direction * endpointGap;
+  }
+  if (preferredSurface === "stem" && endpoint.stem) {
+    return (direction < 0 ? endpoint.stem.top : endpoint.stem.bottom) + direction * endpointGap;
+  }
   if (endpoint.notehead) {
-    return input.context.direction === PlacementEnum.Above
-      ? endpoint.notehead.top - 0.35
-      : endpoint.notehead.bottom + 0.35;
+    return (direction < 0 ? endpoint.notehead.top : endpoint.notehead.bottom) + direction * endpointGap;
   }
   return endpoint.seedAnchor.y;
 }
@@ -312,6 +324,93 @@ function normalizeContinuationInput(
   };
 }
 
+function applySynchronizedBoundaryClearance(
+  input: NormalizedLinkedInput,
+  target: SlurContinuationBoundaryTarget,
+  side: "start" | "end",
+  clearance: number,
+): void {
+  const context: SlurLayoutContext = input.context;
+  const adjustedTarget: number = context.direction === PlacementEnum.Above
+    ? context.envelope.topLineOffset - clearance
+    : context.envelope.bottomLineOffset + clearance;
+  target.effectiveClearance = clearance;
+  target.target = adjustedTarget;
+  const width: number = input.seed.p3.x - input.seed.p0.x;
+  const run: number = Math.max(0.001, Math.abs(width) / 3);
+  if (side === "start") {
+    input.seed.p0.y = adjustedTarget;
+    input.seed.p1 = new PointF2D(
+      input.seed.p0.x + Math.sign(width) * run,
+      adjustedTarget + target.tangent * Math.sign(width) * run,
+    );
+    input.context = {
+      ...context,
+      start: {
+        ...context.start,
+        seedAnchor: new PointF2D(context.start.seedAnchor.x, adjustedTarget),
+        preferredTangent: target.tangent,
+      },
+    };
+  } else {
+    input.seed.p3.y = adjustedTarget;
+    input.seed.p2 = new PointF2D(
+      input.seed.p3.x - Math.sign(width) * run,
+      adjustedTarget - target.tangent * Math.sign(width) * run,
+    );
+    input.context = {
+      ...context,
+      end: {
+        ...context.end,
+        seedAnchor: new PointF2D(context.end.seedAnchor.x, adjustedTarget),
+        preferredTangent: target.tangent,
+      },
+    };
+  }
+}
+
+function synchronizeSameStaffBoundaryClearances(inputs: NormalizedLinkedInput[]): void {
+  for (let index: number = 0; index < inputs.length - 1; index++) {
+    const outgoing: NormalizedLinkedInput = inputs[index];
+    const returning: NormalizedLinkedInput = inputs[index + 1];
+    if (outgoing.context.isCrossStaff || returning.context.isCrossStaff) {
+      // Cross-staff continuations intentionally retain a directed difference
+      // between the two break heights.
+      continue;
+    }
+    const expectedArticulationPosition: number = returning.context.direction === PlacementEnum.Above ? 3 : 4;
+    const returnsToDurationArticulation: boolean = returning.context.end.articulations.some(
+      (articulation): boolean =>
+        articulation.classification === "duration" &&
+        articulation.position === expectedArticulationPosition,
+    );
+    if (!returnsToDurationArticulation) {
+      // Ordinary short returns retain their destination-aware travel cap. A
+      // duration mark outside the endpoint is the case where the two visible
+      // fragments must instead read as one continuous outer arch.
+      continue;
+    }
+    const outgoingTarget: SlurContinuationBoundaryTarget = outgoing.targets.find(
+      (target): boolean => target.side === "end",
+    );
+    const returningTarget: SlurContinuationBoundaryTarget = returning.targets.find(
+      (target): boolean => target.side === "start",
+    );
+    if (!outgoingTarget || !returningTarget) {
+      continue;
+    }
+    // A system break is one visual cut through the phrase. Preserve the more
+    // outward of the two independently safe clearances on both sides, so the
+    // return starts at the same relative height as the exit.
+    const sharedClearance: number = Math.max(
+      outgoingTarget.effectiveClearance,
+      returningTarget.effectiveClearance,
+    );
+    applySynchronizedBoundaryClearance(outgoing, outgoingTarget, "end", sharedClearance);
+    applySynchronizedBoundaryClearance(returning, returningTarget, "start", sharedClearance);
+  }
+}
+
 function continuationTangentMismatch(
   context: SlurLayoutContext,
   geometry: SlurCurveGeometry,
@@ -377,6 +476,7 @@ export function calculateLinkedSlurLayouts(
     normalizedInputs = ordered.map((input): NormalizedLinkedInput =>
       normalizeContinuationInput(input, trajectory, routedClearance),
     );
+    synchronizeSameStaffBoundaryClearances(normalizedInputs);
     results = normalizedInputs.map((input): SlurLayoutResult =>
       calculateCandidateSlurLayout(input.context, input.seed, options),
     );

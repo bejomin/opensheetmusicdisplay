@@ -1028,6 +1028,15 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
       endNoteIndexInTie = endNote.vfnote[1];
     }
 
+    const applyTieDirection: (vfTie: VF.StaveTie) => void = (vfTie: VF.StaveTie): void => {
+      const tieDirection: PlacementEnum = tie.Tie.getTieDirection(startNote?.sourceNote);
+      if (tieDirection === PlacementEnum.Below) {
+        vfTie.setDirection(1); // + is down in VexFlow
+      } else if (tieDirection === PlacementEnum.Above) {
+        vfTie.setDirection(-1);
+      }
+    };
+
     if (tieIsAtSystemBreak) {
       // split tie into two ties:
       if (vfStartNote) { // first_note or last_note must be not null in Vexflow
@@ -1035,6 +1044,7 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
           firstIndexes: [startNoteIndexInTie],
           firstNote: vfStartNote
         });
+        applyTieDirection(vfTie1);
         assignTieSvgId(vfTie1);
         const measure1: VexFlowMeasure = (startNote.parentVoiceEntry.parentStaffEntry.parentMeasure as VexFlowMeasure);
         measure1.addStaveTie(vfTie1, tie);
@@ -1045,6 +1055,7 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
           lastIndexes: [endNoteIndexInTie],
           lastNote: vfEndNote
         });
+        applyTieDirection(vfTie2);
         assignTieSvgId(vfTie2);
         const measure2: VexFlowMeasure = (endNote.parentVoiceEntry.parentStaffEntry.parentMeasure as VexFlowMeasure);
         measure2.addStaveTie(vfTie2, tie);
@@ -1090,12 +1101,7 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
             lastIndexes: [endNoteIndexInTie],
             lastNote: vfEndNote
           });
-          const tieDirection: PlacementEnum = tie.Tie.getTieDirection(startNote.sourceNote);
-          if (tieDirection === PlacementEnum.Below) {
-            vfTie.setDirection(1); // + is down in vexflow
-          } else if (tieDirection === PlacementEnum.Above) {
-            vfTie.setDirection(-1);
-          }
+          applyTieDirection(vfTie);
         }
 
         assignTieSvgId(vfTie);

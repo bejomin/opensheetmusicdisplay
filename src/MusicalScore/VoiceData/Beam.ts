@@ -29,7 +29,30 @@ export class Beam {
             return false;
         }
         const finiteEndpoints: number[] = endpoints as number[];
-        return Math.max(...finiteEndpoints) - Math.min(...finiteEndpoints) <= 0.5;
+        if (Math.max(...finiteEndpoints) - Math.min(...finiteEndpoints) <= 0.5) {
+            return true;
+        }
+
+        // MusicXML stem endpoints are expressed in the coordinate system of
+        // their own staff. A genuinely horizontal cross-staff beam can
+        // therefore have two very different default-y values even though each
+        // staff describes the same authored beam line. Preserve that intent
+        // when every staff-local run is flat and at least one run contains
+        // enough notes to establish a direction of its own.
+        const endpointsByStaff: Map<number, number[]> = new Map<number, number[]>();
+        for (let index: number = 0; index < this.notes.length; index++) {
+            const staffId: number = this.notes[index].ParentStaff.idInMusicSheet;
+            const staffEndpoints: number[] = endpointsByStaff.get(staffId) ?? [];
+            staffEndpoints.push(finiteEndpoints[index]);
+            endpointsByStaff.set(staffId, staffEndpoints);
+        }
+        if (endpointsByStaff.size < 2 ||
+            !Array.from(endpointsByStaff.values()).some((staffEndpoints: number[]): boolean => staffEndpoints.length >= 2)) {
+            return false;
+        }
+        return Array.from(endpointsByStaff.values()).every((staffEndpoints: number[]): boolean =>
+            Math.max(...staffEndpoints) - Math.min(...staffEndpoints) <= 0.5,
+        );
     }
 
     constructor(beamNumber: number = 1, beamNumberOffsetToXML: number = 0) {

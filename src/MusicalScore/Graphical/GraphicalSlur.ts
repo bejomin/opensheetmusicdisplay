@@ -810,6 +810,7 @@ export class GraphicalSlur extends GraphicalCurve {
                 seedAttachment: attachment,
                 tiedEndpoint: Boolean(note?.sourceNote?.NoteTie),
                 chordSize: note?.parentVoiceEntry?.notes?.length ?? 0,
+                polyphonic: (note?.sourceNote?.ParentVoiceEntry?.ParentSourceStaffEntry?.VoiceEntries?.length ?? 0) > 1,
                 grace: side === "start" ? Boolean(this.graceStart) : Boolean(this.graceEnd),
                 systemBoundary: !note,
             };
@@ -951,11 +952,40 @@ export class GraphicalSlur extends GraphicalCurve {
                         measureX + (point.x - staveX) / vexflowUnitInPixels,
                         staffLine.TopLineOffset + (point.y - staffTopY) / vexflowUnitInPixels,
                     );
+                const tieStartOnStaffLine: boolean = graphicalTie.StartNote?.parentVoiceEntry
+                    ?.parentStaffEntry?.parentMeasure?.ParentStaffLine === staffLine;
+                const tieEndOnStaffLine: boolean = graphicalTie.EndNote?.parentVoiceEntry
+                    ?.parentStaffEntry?.parentMeasure?.ParentStaffLine === staffLine;
+                const tieStartGeometry: RenderedSlurEndpointGeometry = tieStartOnStaffLine
+                    ? this.renderedEndpointGeometry(graphicalTie.StartNote, staffLine)
+                    : undefined;
+                const tieEndGeometry: RenderedSlurEndpointGeometry = tieEndOnStaffLine
+                    ? this.renderedEndpointGeometry(graphicalTie.EndNote, staffLine)
+                    : undefined;
                 curves.forEach((tieCurve, tieIndex): void => {
-                    const start: PointF2D = convert(tieCurve.start);
-                    const end: PointF2D = convert(tieCurve.end);
-                    const topControl: PointF2D = convert(tieCurve.topControl);
-                    const bottomControl: PointF2D = convert(tieCurve.bottomControl);
+                    let start: PointF2D = convert(tieCurve.start);
+                    let end: PointF2D = convert(tieCurve.end);
+                    let topControl: PointF2D = convert(tieCurve.topControl);
+                    let bottomControl: PointF2D = convert(tieCurve.bottomControl);
+                    if (tieStartGeometry?.notehead && tieEndGeometry?.notehead) {
+                        const startHead: GraphicalSlurBoundsDiagnostics = tieStartGeometry.notehead;
+                        const endHead: GraphicalSlurBoundsDiagnostics = tieEndGeometry.notehead;
+                        const startsOnLeft: boolean = (startHead.left + startHead.right) / 2
+                            <= (endHead.left + endHead.right) / 2;
+                        const finalizedStartX: number = startsOnLeft ? startHead.right : startHead.left;
+                        const finalizedEndX: number = startsOnLeft ? endHead.left : endHead.right;
+                        const originalStartX: number = start.x;
+                        const originalEndX: number = end.x;
+                        const originalSpan: number = originalEndX - originalStartX;
+                        const remapX: (x: number) => number = Math.abs(originalSpan) > 0.001
+                            ? (x: number): number => finalizedStartX
+                                + (x - originalStartX) / originalSpan * (finalizedEndX - finalizedStartX)
+                            : (): number => (finalizedStartX + finalizedEndX) / 2;
+                        start = new PointF2D(finalizedStartX, start.y);
+                        end = new PointF2D(finalizedEndX, end.y);
+                        topControl = new PointF2D(remapX(topControl.x), topControl.y);
+                        bottomControl = new PointF2D(remapX(bottomControl.x), bottomControl.y);
+                    }
                     const quadraticControl: PointF2D = new PointF2D(
                         (topControl.x + bottomControl.x) / 2,
                         (topControl.y + bottomControl.y) / 2,
@@ -1539,6 +1569,7 @@ export class GraphicalSlur extends GraphicalCurve {
             seedAttachment: "notehead",
             tiedEndpoint: Boolean(note?.sourceNote?.NoteTie),
             chordSize: note?.parentVoiceEntry?.notes?.length ?? 0,
+            polyphonic: (note?.sourceNote?.ParentVoiceEntry?.ParentSourceStaffEntry?.VoiceEntries?.length ?? 0) > 1,
             grace: side === "start" ? Boolean(this.graceStart) : Boolean(this.graceEnd),
             systemBoundary: false,
         });

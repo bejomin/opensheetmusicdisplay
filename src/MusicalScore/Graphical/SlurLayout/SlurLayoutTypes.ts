@@ -76,8 +76,32 @@ export interface SlurEndpointContext {
     preferredTangent?: number;
     tiedEndpoint: boolean;
     chordSize: number;
+    /** True when another voice is active at this timestamp on the same staff. */
+    polyphonic?: boolean;
     grace: boolean;
     systemBoundary: boolean;
+}
+
+export type SlurEndpointSurface = "beam" | "stem" | "head";
+
+/**
+ * The rendered surface a phrase should meet at an ordinary endpoint. Only an
+ * single note on the slur-facing stem side may attach to a stem or its beam.
+ * A chord in polyphonic texture may do the same, because the stem identifies
+ * the phrase's voice; monophonic chords and opposing stems retain a notehead
+ * attachment. A tie ending at a single note does not hide that finalized stem
+ * surface.
+ */
+export function preferredSlurEndpointSurface(endpoint: SlurEndpointContext): SlurEndpointSurface {
+    if (endpoint.stemSide && (endpoint.chordSize <= 1 || endpoint.polyphonic)) {
+        if (endpoint.beamSideAnchor || endpoint.beams.length > 0) {
+            return "beam";
+        }
+        if (endpoint.stem) {
+            return "stem";
+        }
+    }
+    return "head";
 }
 
 export interface SlurArticulationContext {
