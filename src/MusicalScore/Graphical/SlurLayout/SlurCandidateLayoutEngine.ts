@@ -914,6 +914,18 @@ function familyGeometry(
         ? Math.min(control.y, end.y - endpointBow)
         : Math.max(control.y, end.y + endpointBow);
     }
+    // A returning continuation uses this quadratic control for both cubic
+    // handles. If the preferred boundary tangent leaves that shared control
+    // just inside the destination, move only the degenerate far handle back
+    // to the slur side so the curve cannot arrive from beneath its notehead.
+    if (context.start.systemBoundary) {
+      const returnBow: number = Math.min(0.2, Math.max(0.03, Math.abs(width) * 0.015));
+      if (context.direction === PlacementEnum.Above && control.y >= end.y) {
+        control.y = end.y - returnBow;
+      } else if (context.direction === PlacementEnum.Below && control.y <= end.y) {
+        control.y = end.y + returnBow;
+      }
+    }
     return {
       p0,
       p1: new PointF2D(
