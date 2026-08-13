@@ -20,6 +20,9 @@ export interface SlurLinkedLayoutInput {
   seed: SlurCurveGeometry;
   /** Staff-line y offset inside its music system, used to compare cross-staff endpoints. */
   staffOffsetY?: number;
+  /** Semantic endpoints of the complete linked phrase, including on boundary-only fragments. */
+  sourcePitchHalfTone?: number;
+  destinationPitchHalfTone?: number;
 }
 
 export interface SlurLinkedLayoutOutput {
@@ -126,8 +129,10 @@ function linkedTrajectory(inputs: readonly SlurLinkedLayoutInput[]): SlurLinkedT
   let destinationSemanticHeight: number = last
     ? semanticEndpointLocalY(last, "end") + (last.staffOffsetY ?? 0)
     : sourceSemanticHeight;
-  const sourcePitch: number | undefined = first?.context.start.pitchHalfTone;
-  const destinationPitch: number | undefined = last?.context.end.pitchHalfTone;
+  const sourcePitch: number | undefined = first?.sourcePitchHalfTone
+    ?? first?.context.start.pitchHalfTone;
+  const destinationPitch: number | undefined = last?.destinationPitchHalfTone
+    ?? last?.context.end.pitchHalfTone;
   if (
     Number.isFinite(sourcePitch) &&
     Number.isFinite(destinationPitch) &&

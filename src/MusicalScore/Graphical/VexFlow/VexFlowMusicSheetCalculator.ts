@@ -2949,6 +2949,8 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
               context: linkedContext,
               seed,
               staffOffsetY: staffLine.PositionAndShape.RelativePosition.y,
+              sourcePitchHalfTone: sourceSlur.StartNote?.halfTone,
+              destinationPitchHalfTone: sourceSlur.EndNote?.halfTone,
             });
           }
         }
