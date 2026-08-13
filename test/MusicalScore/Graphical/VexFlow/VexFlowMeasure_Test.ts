@@ -34,6 +34,7 @@ import { TechnicalInstruction, TechnicalInstructionType } from
    "../../../../src/MusicalScore/VoiceData/Instructions/TechnicalInstruction";
 import { VexFlowFingeringModifier } from
    "../../../../src/MusicalScore/Graphical/VexFlow/VexFlowFingeringModifier";
+import { FontStyles } from "../../../../src/Common/Enums/FontStyles";
 
 describe("VexFlow Measure", () => {
 
@@ -272,6 +273,37 @@ describe("VexFlow Measure", () => {
          expect(tie.getRenderedTieCurves()[0].start.x).to.be.closeTo(firstRender[index].start, 0.01);
          expect(tie.getRenderedTieCurves()[0].end.x).to.be.closeTo(firstRender[index].end, 0.01);
       });
+   });
+
+   it("preserves explicit tie directions on both sides of a system break", async (): Promise<void> => {
+      const xml: string = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
+<part id="P1"><measure number="1"><attributes><divisions>1</divisions>
+<time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>
+<note><pitch><step>C</step><octave>5</octave></pitch><duration>4</duration><tie type="start"/>
+<voice>1</voice><type>whole</type><notations><tied type="start" orientation="under"/></notations></note>
+<note><chord/><pitch><step>E</step><octave>5</octave></pitch><duration>4</duration><tie type="start"/>
+<voice>1</voice><type>whole</type><notations><tied type="start" orientation="over"/></notations></note>
+</measure><measure number="2"><print new-system="yes"/>
+<note><pitch><step>C</step><octave>5</octave></pitch><duration>4</duration><tie type="stop"/>
+<voice>1</voice><type>whole</type><notations><tied type="stop" orientation="under"/></notations></note>
+<note><chord/><pitch><step>E</step><octave>5</octave></pitch><duration>4</duration><tie type="stop"/>
+<voice>1</voice><type>whole</type><notations><tied type="stop" orientation="over"/></notations></note>
+</measure></part></score-partwise>`;
+      const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(
+         TestUtils.getDivElement(document),
+      );
+      osmd.setOptions({newSystemFromXML: true});
+      await osmd.load(xml);
+      osmd.render();
+
+      for (const measureIndex of [0, 1]) {
+         const measure: any = osmd.GraphicSheet.findGraphicalMeasure(measureIndex, 0);
+         const directions: number[] = measure.vfTies
+            .map((tie: any): number => tie.getDirection())
+            .sort((left: number, right: number): number => left - right);
+         expect(directions).to.deep.equal([-1, 1]);
+      }
    });
 
    it("does not shorten an outer tie endpoint through a facing stem", async (): Promise<void> => {
@@ -754,6 +786,9 @@ describe("VexFlow Measure", () => {
          .filter((entry: GraphicalFingeringEntry): boolean => entry.IsSubstitution);
       expect(normalGroups.map((entry: GraphicalFingeringEntry): string => entry.Label.text).sort())
          .to.deep.equal(["2\u20091", "3\u20094"]);
+      expect(normalGroups.every((entry: GraphicalFingeringEntry): boolean =>
+         entry.Label.fontStyle === FontStyles.Bold), "ordinary substitution digits use the bold fingering weight")
+         .to.equal(true);
 
       const displacedChordFingerings: GraphicalFingeringEntry[] = graphicalMeasures[0].staffEntries
          .flatMap((staffEntry: GraphicalStaffEntry): GraphicalFingeringEntry[] => staffEntry.FingeringEntries)
@@ -786,6 +821,18 @@ describe("VexFlow Measure", () => {
          expect(group.PositionAndShape.RelativePosition.x, "complete substitution group is centred on its notehead")
             .to.be.closeTo(expectedX, 0.001);
          expect(group.SubstitutionArcSVGNode, "substitution group has a rendered arc").to.not.equal(undefined);
+         const arcOffsets: {left: number, right: number} = group.getSubstitutionArcHorizontalOffsets();
+         const line: typeof group.TextLines[0] = group.TextLines[0];
+         const firstDigitWidth: number = line.runs[0].width;
+         const lastDigitWidth: number = line.runs[line.runs.length - 1].width;
+         expect(arcOffsets.left, "arc begins at the first digit's horizontal centre").to.be.closeTo(
+            group.PositionAndShape.BorderLeft + line.xOffset + firstDigitWidth / 2,
+            0.001,
+         );
+         expect(arcOffsets.right, "arc ends at the last digit's horizontal centre").to.be.closeTo(
+            group.PositionAndShape.BorderRight - lastDigitWidth / 2,
+            0.001,
+         );
          if (group.Placement === PlacementEnum.Above) {
             expect(group.PositionAndShape.BorderTop).to.be.lessThan(-osmd.EngravingRules.FingeringTextSize);
          } else {
@@ -804,6 +851,8 @@ describe("VexFlow Measure", () => {
       expect(graceModifiers).to.have.length(2);
       expect(graceModifiers.every((modifier: VexFlowFingeringModifier): boolean => modifier.IsSubstitution))
          .to.equal(true);
+      expect(graceModifiers.every((modifier: VexFlowFingeringModifier): boolean => modifier.fontWeight === "bold"),
+         "grace substitutions share the bold fingering weight").to.equal(true);
       expect(graceModifiers.map((modifier: VexFlowFingeringModifier): string =>
          modifier.getFretHandFinger()).sort()).to.deep.equal(["1\u20092", "3\u20094"]);
       expect(graceModifiers.every((modifier: VexFlowFingeringModifier): boolean =>

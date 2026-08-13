@@ -15,7 +15,7 @@ import { GraphicalLabel } from "./GraphicalLabel";
 export class GraphicalFingeringEntry extends GraphicalLabel {
     public static readonly SubstitutionArcGap: number = 0.08;
     public static readonly SubstitutionArcHeight: number = 0.28;
-    public static readonly SubstitutionArcThickness: number = 0.07;
+    public static readonly SubstitutionArcThickness: number = 0.1;
     public SubstitutionArcSVGNode: Node;
     public readonly SourceNote: Note;
     public readonly Placement: PlacementEnum;
@@ -53,5 +53,29 @@ export class GraphicalFingeringEntry extends GraphicalLabel {
             this.PositionAndShape.BorderBottom += arcExtent;
             this.PositionAndShape.BorderMarginBottom += arcExtent;
         }
+    }
+
+    /** Horizontal digit centres, relative to the label anchor, for drawing a
+     * substitution arc. Separating the measured runs keeps whitespace from
+     * moving either endpoint away from its numeral. */
+    public getSubstitutionArcHorizontalOffsets(): {left: number, right: number} {
+        const line: typeof this.TextLines[0] = this.TextLines?.[0];
+        if (!this.IsSubstitution || !line?.runs?.length) {
+            return {
+                left: this.PositionAndShape.BorderLeft,
+                right: this.PositionAndShape.BorderRight,
+            };
+        }
+        let cursor: number = this.PositionAndShape.BorderLeft + line.xOffset;
+        const centres: number[] = [];
+        for (const run of line.runs) {
+            if (run.text.trim().length > 0) {
+                centres.push(cursor + run.width / 2);
+            }
+            cursor += run.width;
+        }
+        return centres.length > 0
+            ? {left: centres[0], right: centres[centres.length - 1]}
+            : {left: this.PositionAndShape.BorderLeft, right: this.PositionAndShape.BorderRight};
     }
 }

@@ -716,6 +716,7 @@ export class VexFlowConverter {
             }
             let vfArt: VF.Articulation = undefined;
             const articulationEnum: ArticulationEnum = articulation.articulationEnum;
+            let renderedArticulationEnum: ArticulationEnum = articulationEnum;
             if (rules.ArticulationPlacementFromXML) {
                 if (articulation.placement === PlacementEnum.Above) {
                     vfArtPosition = VF.Modifier.Position.ABOVE;
@@ -756,9 +757,51 @@ export class VexFlowConverter {
                     }
                     break;
                 }
-                case ArticulationEnum.fermata: {
-                    vfArt = new VF.Articulation("a@a");
-                    vfArtPosition = VF.Modifier.Position.ABOVE;
+                case ArticulationEnum.fermata:
+                case ArticulationEnum.invertedfermata: {
+                    const pve: VoiceEntry = gNote.sourceNote.ParentVoiceEntry;
+                    const parentMeasure: GraphicalMeasure = gNote.parentVoiceEntry.parentStaffEntry.parentMeasure;
+                    const parentStaff: Staff = parentMeasure?.ParentStaff;
+                    const instrumentStaves: Staff[] = parentStaff?.ParentInstrument?.Staves ?? [];
+                    const isGrandStaff: boolean = instrumentStaves.length === 2;
+                    if (isGrandStaff) {
+                        const representative: Articulation = pve.ParentSourceStaffEntry.VoiceEntries
+                            .flatMap((voiceEntry: VoiceEntry): Articulation[] => voiceEntry.Articulations)
+                            .find((candidate: Articulation): boolean =>
+                                candidate.articulationEnum === ArticulationEnum.fermata ||
+                                candidate.articulationEnum === ArticulationEnum.invertedfermata,
+                            );
+                        if (representative !== articulation) {
+                            continue;
+                        }
+                    }
+                    const placeBelow: boolean = isGrandStaff
+                        ? parentStaff === instrumentStaves[1]
+                        : articulationEnum === ArticulationEnum.invertedfermata;
+                    const targetVoiceEntry: VoiceEntry = placeBelow
+                        ? pve.ParentSourceStaffEntry.VoiceEntries.last()
+                        : pve.ParentSourceStaffEntry.VoiceEntries[0];
+                    if (pve !== targetVoiceEntry) {
+                        const targetGraphicalVoiceEntry: GraphicalVoiceEntry =
+                            gNote.parentVoiceEntry.parentStaffEntry.graphicalVoiceEntries.find(
+                                (entry: GraphicalVoiceEntry): boolean => entry.parentVoiceEntry === targetVoiceEntry,
+                            );
+                        const targetGraphicalNote: VexFlowGraphicalNote =
+                            targetGraphicalVoiceEntry?.notes?.[0] as VexFlowGraphicalNote;
+                        const targetStaveNote: VF.StemmableNote = targetGraphicalNote?.vfnote?.[0];
+                        if (targetStaveNote) {
+                            modifierTarget = targetStaveNote;
+                            modifierTargetGraphicalNote = targetGraphicalNote;
+                            modifierTargetIndex = targetGraphicalNote.vfnoteIndex ?? 0;
+                        }
+                    }
+                    renderedArticulationEnum = placeBelow
+                        ? ArticulationEnum.invertedfermata
+                        : ArticulationEnum.fermata;
+                    vfArt = new VF.Articulation(placeBelow ? "a@u" : "a@a");
+                    vfArtPosition = placeBelow
+                        ? VF.Modifier.Position.BELOW
+                        : VF.Modifier.Position.ABOVE;
                     break;
                 }
                 case ArticulationEnum.marcatodown: {
@@ -779,32 +822,6 @@ export class VexFlowConverter {
                     //     }
                     //     //console.log("measure " + gNote.parentVoiceEntry.parentStaffEntry.parentMeasure.MeasureNumber + ", line " + noteLine);
                     // }
-                    break;
-                }
-                case ArticulationEnum.invertedfermata: {
-                    const pve: VoiceEntry = gNote.sourceNote.ParentVoiceEntry;
-                    const targetVoiceEntry: VoiceEntry = pve.ParentSourceStaffEntry.VoiceEntries.last();
-                    // Place an inverted fermata below the lowest voice without
-                    // moving it between source-model arrays. Mutating those
-                    // arrays made each updateGraphic()/render() pass append the
-                    // same articulation again and changed the second layout.
-                    if (pve !== targetVoiceEntry) {
-                        const targetGraphicalVoiceEntry: GraphicalVoiceEntry =
-                            gNote.parentVoiceEntry.parentStaffEntry.graphicalVoiceEntries.find(
-                                (entry: GraphicalVoiceEntry): boolean => entry.parentVoiceEntry === targetVoiceEntry,
-                            );
-                        const targetGraphicalNote: VexFlowGraphicalNote =
-                            targetGraphicalVoiceEntry?.notes?.[0] as VexFlowGraphicalNote;
-                        const targetStaveNote: VF.StemmableNote = targetGraphicalNote?.vfnote?.[0];
-                        if (!targetStaveNote) {
-                            continue;
-                        }
-                        modifierTarget = targetStaveNote;
-                        modifierTargetGraphicalNote = targetGraphicalNote;
-                        modifierTargetIndex = targetGraphicalNote.vfnoteIndex ?? 0;
-                    }
-                    vfArt = new VF.Articulation("a@u");
-                    vfArtPosition = VF.Modifier.Position.BELOW;
                     break;
                 }
                 case ArticulationEnum.lefthandpizzicato: {
@@ -848,7 +865,7 @@ export class VexFlowConverter {
             }
             if (vfArt) {
                 vfArt.setPosition(vfArtPosition);
-                (vfArt as any).osmdArticulationEnum = articulationEnum;
+                (vfArt as any).osmdArticulationEnum = renderedArticulationEnum;
                 (vfArt as any).osmdSourceArticulation = articulation;
                 (vfArt as any).osmdGraphicalNote = modifierTargetGraphicalNote;
                 (modifierTarget as StaveNote).addModifier(vfArt, modifierTargetIndex);

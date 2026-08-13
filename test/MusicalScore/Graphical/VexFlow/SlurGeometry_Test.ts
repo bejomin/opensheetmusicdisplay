@@ -151,6 +151,108 @@ function systemBreakScore(): string {
       </score-partwise>`;
 }
 
+function crossStaffSystemBreakScore(): string {
+   return `<?xml version="1.0" encoding="UTF-8"?>
+      <score-partwise version="4.0">
+         <part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
+         <part id="P1">
+            <measure number="1">
+               <attributes>
+                  <divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+                  <staves>2</staves>
+                  <clef number="1"><sign>G</sign><line>2</line></clef>
+                  <clef number="2"><sign>F</sign><line>4</line></clef>
+               </attributes>
+               <note><rest/><duration>4</duration><voice>1</voice><type>whole</type><staff>1</staff></note>
+               <backup><duration>4</duration></backup>
+               <note>
+                  <pitch><step>C</step><octave>3</octave></pitch>
+                  <duration>4</duration><voice>5</voice><type>whole</type><staff>2</staff>
+                  <notations><slur number="1" type="start" placement="above"/></notations>
+               </note>
+            </measure>
+            <measure number="2">
+               <print new-system="yes"/>
+               <note>
+                  <pitch><step>G</step><octave>4</octave></pitch>
+                  <duration>4</duration><voice>1</voice><type>whole</type><staff>1</staff>
+                  <notations><slur number="1" type="stop"/></notations>
+               </note>
+               <backup><duration>4</duration></backup>
+               <note><rest/><duration>4</duration><voice>5</voice><type>whole</type><staff>2</staff></note>
+            </measure>
+         </part>
+      </score-partwise>`;
+}
+
+function tiedChordSystemBreakScore(): string {
+   return `<?xml version="1.0" encoding="UTF-8"?>
+      <score-partwise version="4.0">
+         <part-list><score-part id="P1"><part-name>Piano LH</part-name></score-part></part-list>
+         <part id="P1">
+            <measure number="1">
+               <attributes>
+                  <divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+                  <clef><sign>F</sign><line>4</line></clef>
+               </attributes>
+               <note>
+                  <pitch><step>A</step><octave>2</octave></pitch>
+                  <duration>4</duration><voice>1</voice><type>whole</type>
+                  <notations><slur number="1" type="start" placement="above"/></notations>
+               </note>
+            </measure>
+            <measure number="2">
+               <print new-system="yes"/>
+               <note>
+                  <pitch><step>E</step><octave>3</octave></pitch>
+                  <duration>4</duration><voice>1</voice><type>whole</type><tie type="start"/>
+                  <notations><tied type="start"/><slur number="1" type="stop"/></notations>
+               </note>
+               <note><chord/><pitch><step>B</step><octave>2</octave></pitch>
+                  <duration>4</duration><voice>1</voice><type>whole</type></note>
+               <note><chord/><pitch><step>E</step><octave>2</octave></pitch>
+                  <duration>4</duration><voice>1</voice><type>whole</type></note>
+            </measure>
+         </part>
+      </score-partwise>`;
+}
+
+function ledgerEndpointScore(): string {
+   return `<?xml version="1.0" encoding="UTF-8"?>
+      <score-partwise version="4.0">
+         <part-list><score-part id="P1"><part-name>Ledger slur</part-name></score-part></part-list>
+         <part id="P1"><measure number="1">
+            <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+               <clef><sign>G</sign><line>2</line></clef></attributes>
+            <note><pitch><step>C</step><octave>6</octave></pitch><duration>2</duration><voice>1</voice>
+               <type>half</type><notations><slur number="1" type="start" placement="above"/></notations></note>
+            <note><pitch><step>D</step><octave>6</octave></pitch><duration>2</duration><voice>1</voice>
+               <type>half</type><notations><slur number="1" type="stop"/></notations></note>
+         </measure></part>
+      </score-partwise>`;
+}
+
+function neighbouringTieObstacleScore(): string {
+   return `<?xml version="1.0" encoding="UTF-8"?>
+      <score-partwise version="4.0">
+         <part-list><score-part id="P1"><part-name>Tie obstacle</part-name></score-part></part-list>
+         <part id="P1"><measure number="1">
+            <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+               <clef><sign>G</sign><line>2</line></clef></attributes>
+            <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice>
+               <type>half</type><tie type="start"/><notations><tied type="start"/></notations></note>
+            <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice>
+               <type>half</type><tie type="stop"/><notations><tied type="stop"/></notations></note>
+            <backup><duration>4</duration></backup>
+            <note><pitch><step>E</step><octave>5</octave></pitch><duration>2</duration><voice>2</voice>
+               <type>half</type><stem>down</stem>
+               <notations><slur number="1" type="start" placement="above"/></notations></note>
+            <note><pitch><step>G</step><octave>5</octave></pitch><duration>2</duration><voice>2</voice>
+               <type>half</type><stem>down</stem><notations><slur number="1" type="stop"/></notations></note>
+         </measure></part>
+      </score-partwise>`;
+}
+
 function multiSystemArticulationScore(): string {
    return `<?xml version="1.0" encoding="UTF-8"?>
       <score-partwise version="4.0">
@@ -497,7 +599,45 @@ describe("Stage 6 slur geometry", (): void => {
       expect(obstacles.some((obstacle) => obstacle.type === "beam" && obstacle.endpoint)).to.equal(true);
    });
 
-   it("links cross-system segments with shared placement and horizontal break tangents", async (): Promise<void> => {
+   it("collects finalized ledger lines as typed endpoint obstacles", async (): Promise<void> => {
+      const osmd: OpenSheetMusicDisplay =
+         TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+      await osmd.load(ledgerEndpointScore());
+      osmd.render();
+
+      const obstacles: SlurObstacle[] = allSlurs(osmd).flatMap(
+         ({slur}) => slur.layoutContext?.obstacles ?? [],
+      );
+      expect(obstacles.some(
+         (obstacle): boolean => obstacle.type === "ledger-line" && Boolean(obstacle.endpoint),
+      )).to.equal(true);
+   });
+
+   it("normalizes complete tie obstacles to finalized notehead shoulders", async (): Promise<void> => {
+      const osmd: OpenSheetMusicDisplay =
+         TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+      await osmd.load(neighbouringTieObstacleScore());
+      osmd.updateGraphic();
+      osmd.render();
+
+      const slur: GraphicalSlur = allSlurs(osmd)[0].slur;
+      const tieObstacle: SlurObstacle = (slur as any).layoutContext.obstacles.find(
+         (obstacle: SlurObstacle): boolean => obstacle.type === "tie" && Boolean(obstacle.curve),
+      );
+      const noteheadObstacles: SlurObstacle[] = (slur as any).layoutContext.obstacles.filter(
+         (obstacle: SlurObstacle): boolean => obstacle.type === "notehead",
+      );
+
+      expect(tieObstacle).to.not.equal(undefined);
+      expect(noteheadObstacles.some((obstacle: SlurObstacle): boolean =>
+         Math.abs(obstacle.bounds.right - tieObstacle.curve.p0.x) < 0.001),
+      "the tie starts at a finalized right notehead shoulder").to.equal(true);
+      expect(noteheadObstacles.some((obstacle: SlurObstacle): boolean =>
+         Math.abs(obstacle.bounds.left - tieObstacle.curve.p3.x) < 0.001),
+      "the tie ends at a finalized left notehead shoulder").to.equal(true);
+   });
+
+   it("links cross-system segments with shared placement and directional break tangents", async (): Promise<void> => {
       const osmd: OpenSheetMusicDisplay =
          TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
       await osmd.load(systemBreakScore());
@@ -508,18 +648,28 @@ describe("Stage 6 slur geometry", (): void => {
       const segments: GraphicalSlur[] = allSlurs(osmd)
          .map(({slur}) => slur)
          .sort((left, right): number => left.diagnostics.segmentIndex - right.diagnostics.segmentIndex);
-      expect(segments).to.have.length(2);
+      expect(
+         segments,
+         `systems=${osmd.GraphicSheet.MusicPages.flatMap((page) => page.MusicSystems).length}; ` +
+         `all-slurs=${allSlurs(osmd).length}`,
+      ).to.have.length(2);
       expect(segments[0].diagnostics.segmentCount).to.equal(2);
       expect(segments[1].diagnostics.segmentCount).to.equal(2);
       expect(segments[0].diagnostics.placement).to.equal(segments[1].diagnostics.placement);
       expect(segments[0].diagnostics.linkedGroupId).to.equal(segments[1].diagnostics.linkedGroupId);
       expect(segments[0].diagnostics.continuationClearance)
          .to.equal(segments[1].diagnostics.continuationClearance);
-      expect(segments[0].diagnostics.linkedTangentMismatch).to.equal(0);
-      expect(segments[1].diagnostics.linkedTangentMismatch).to.equal(0);
+      expect(segments[0].diagnostics.linkedTangentMismatch).to.be.closeTo(0, 1e-9);
+      expect(segments[1].diagnostics.linkedTangentMismatch).to.be.closeTo(0, 1e-9);
       expect(segments.flatMap((segment) => segment.diagnostics.structuredFaults ?? [])).to.have.length(0);
-      expect(segments[0].bezierEndControlPt.y).to.be.closeTo(segments[0].bezierEndPt.y, 0.001);
-      expect(segments[1].bezierStartControlPt.y).to.be.closeTo(segments[1].bezierStartPt.y, 0.001);
+      const outgoingSlope: number =
+         (segments[0].bezierEndPt.y - segments[0].bezierEndControlPt.y) /
+         (segments[0].bezierEndPt.x - segments[0].bezierEndControlPt.x);
+      const returningSlope: number =
+         (segments[1].bezierStartControlPt.y - segments[1].bezierStartPt.y) /
+         (segments[1].bezierStartControlPt.x - segments[1].bezierStartPt.x);
+      expect(outgoingSlope).to.be.closeTo(segments[0].diagnostics.linkedContinuationSlope, 0.001);
+      expect(returningSlope).to.be.closeTo(segments[1].diagnostics.linkedContinuationSlope, 0.001);
       expect(segments[0].bezierStartPt.x).to.be.within(
          segments[0].diagnostics.startNotehead.left - 1,
          segments[0].diagnostics.startNotehead.right + 1,
@@ -528,6 +678,62 @@ describe("Stage 6 slur geometry", (): void => {
          segments[1].diagnostics.endNotehead.left - 1,
          segments[1].diagnostics.endNotehead.right + 1,
       );
+   });
+
+   it("links cross-staff slurs across a system break", async (): Promise<void> => {
+      const osmd: OpenSheetMusicDisplay =
+         TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+      await osmd.load(crossStaffSystemBreakScore());
+      osmd.Sheet.Rules.NewSystemAtXMLNewSystemAttribute = true;
+      osmd.updateGraphic();
+      osmd.render();
+
+      const segments: GraphicalSlur[] = allSlurs(osmd)
+         .map(({slur}) => slur)
+         .filter((slur): boolean => slur.slur.isCrossed())
+         .sort((left, right): number => left.diagnostics.segmentIndex - right.diagnostics.segmentIndex);
+      expect(segments).to.have.length(2);
+      expect(segments.map((segment) => segment.diagnostics.segmentIndex)).to.deep.equal([0, 1]);
+      expect(segments.every((segment) => segment.diagnostics.segmentCount === 2)).to.equal(true);
+      expect(segments.every((segment) => segment.diagnostics.unsupportedRouting === undefined)).to.equal(true);
+      expect(segments.flatMap((segment) => segment.diagnostics.structuredFaults ?? [])).to.have.length(0);
+      expect(segments[0].diagnostics.endAttachment).to.equal("system-edge");
+      expect(segments[1].diagnostics.startAttachment).to.equal("system-edge");
+      expect(segments[0].diagnostics.linkedSourceSemanticHeight)
+         .to.be.greaterThan(segments[0].diagnostics.linkedDestinationSemanticHeight);
+      expect(segments[0].diagnostics.linkedContinuationSlope).to.be.lessThan(0);
+      expect(segments[0].bezierEndPt.y).to.be.lessThan(segments[0].bezierStartPt.y);
+      expect(segments[1].bezierStartPt.y).to.be.greaterThan(segments[1].bezierEndPt.y);
+      for (const segment of segments) {
+         expect([segment.bezierStartPt, segment.bezierStartControlPt,
+            segment.bezierEndControlPt, segment.bezierEndPt].every(
+            (point): boolean => Number.isFinite(point.x) && Number.isFinite(point.y),
+         )).to.equal(true);
+      }
+   });
+
+   it("returns an above system-break slur to the head of a tied chord", async (): Promise<void> => {
+      const osmd: OpenSheetMusicDisplay =
+         TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+      await osmd.load(tiedChordSystemBreakScore());
+      osmd.Sheet.Rules.NewSystemAtXMLNewSystemAttribute = true;
+      osmd.updateGraphic();
+      osmd.render();
+
+      const segments: GraphicalSlur[] = allSlurs(osmd)
+         .map(({slur}) => slur)
+         .sort((left, right): number => left.diagnostics.segmentIndex - right.diagnostics.segmentIndex);
+      expect(segments).to.have.length(2);
+      expect(segments.every((segment): boolean => segment.placement === PlacementEnum.Above)).to.equal(true);
+      expect(segments[1].diagnostics.endAttachment).to.not.equal("stem-tip");
+      expect(segments[1].diagnostics.endAttachment).to.not.equal("beam-side");
+      expect(segments[1].bezierEndPt.x).to.be.within(
+         segments[1].diagnostics.endNotehead.left - 0.5,
+         segments[1].diagnostics.endNotehead.right + 0.5,
+      );
+      expect(segments[1].bezierStartControlPt.y).to.be.lessThan(segments[1].bezierStartPt.y);
+      expect(segments[1].bezierEndControlPt.y).to.be.lessThan(segments[1].bezierEndPt.y);
+      expect(segments.flatMap((segment) => segment.diagnostics.structuredFaults ?? [])).to.have.length(0);
    });
 
    for (const fixture of [

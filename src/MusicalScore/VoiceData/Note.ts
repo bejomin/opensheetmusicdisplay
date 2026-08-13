@@ -85,6 +85,12 @@ export class Note {
     public IsGraceNote: boolean;
     /** The stem direction asked for in XML. Not necessarily final or wanted stem direction. */
     private stemDirectionXml: StemDirectionType;
+    /**
+     * The authored MusicXML stem endpoint in tenths, relative to the top staff line.
+     * This is retained as semantic engraving metadata; graphical renderers must not
+     * interpret it as an absolute page coordinate.
+     */
+    public StemDefaultYXml?: number;
     /** Tremolo information for this note, e.g. the number of tremolo strokes (16th tremolo = 2 strokes),
      * or the TremoloBetweenNotes object for a tremolo between two notes.
      */

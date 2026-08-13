@@ -22,6 +22,7 @@ export type SlurObstacleType =
     | "notehead"
     | "stem"
     | "beam"
+    | "ledger-line"
     | "accidental"
     | "tie"
     | "duration-articulation"
@@ -64,15 +65,43 @@ export interface SlurEndpointContext {
     notehead?: SlurBounds;
     stem?: SlurBounds;
     beams: readonly SlurBounds[];
+    /** Exact outer edge of the finalized beam at the endpoint stem's x coordinate. */
+    beamSideAnchor?: PointF2D;
     accidentals: readonly SlurBounds[];
     articulations: SlurArticulationContext[];
     /** Geometry-derived starting point retained as one scored candidate. */
     seedAnchor: PointF2D;
     seedAttachment: SlurEndpointAttachment;
+    /** Preferred dy/dx where a linked slur crosses a system boundary. */
+    preferredTangent?: number;
     tiedEndpoint: boolean;
     chordSize: number;
+    /** True when another voice is active at this timestamp on the same staff. */
+    polyphonic?: boolean;
     grace: boolean;
     systemBoundary: boolean;
+}
+
+export type SlurEndpointSurface = "beam" | "stem" | "head";
+
+/**
+ * The rendered surface a phrase should meet at an ordinary endpoint. Only an
+ * single note on the slur-facing stem side may attach to a stem or its beam.
+ * A chord in polyphonic texture may do the same, because the stem identifies
+ * the phrase's voice; monophonic chords and opposing stems retain a notehead
+ * attachment. A tie ending at a single note does not hide that finalized stem
+ * surface.
+ */
+export function preferredSlurEndpointSurface(endpoint: SlurEndpointContext): SlurEndpointSurface {
+    if (endpoint.stemSide && (endpoint.chordSize <= 1 || endpoint.polyphonic)) {
+        if (endpoint.beamSideAnchor || endpoint.beams.length > 0) {
+            return "beam";
+        }
+        if (endpoint.stem) {
+            return "stem";
+        }
+    }
+    return "head";
 }
 
 export interface SlurArticulationContext {
@@ -118,6 +147,8 @@ export interface SlurLayoutContext {
     isCrossStaff: boolean;
     isCrossSystem: boolean;
     isNested: boolean;
+    /** Both rendered endpoints belong to the same source beam. */
+    sharedEndpointBeam?: boolean;
     linkedGroupId?: string;
 }
 
@@ -140,7 +171,21 @@ export interface SlurLinkedLayoutDiagnostics {
     segmentIndexes: readonly number[];
     totalScore: number;
     tangentMismatch: number;
+    sourceSemanticHeight: number;
+    destinationSemanticHeight: number;
+    continuationSlope: number;
+    boundaryTargets: readonly SlurContinuationBoundaryTarget[];
     faults: readonly SlurLayoutFault[];
+}
+
+export interface SlurContinuationBoundaryTarget {
+    segmentIndex: number;
+    side: SlurEndpointSide;
+    requestedClearance: number;
+    effectiveClearance: number;
+    projectedTarget: number;
+    tangent: number;
+    target: number;
 }
 
 export interface SlurAnchorPenalties {

@@ -25,6 +25,7 @@ export class VexFlowFingeringModifier extends VF.FretHandFinger {
     constructor(fingeringText: string, substitution: boolean = false) {
         super(fingeringText);
         this.substitution = substitution;
+        this.fontWeight = "bold";
     }
 
     public get IsSubstitution(): boolean {
@@ -204,9 +205,14 @@ export class VexFlowFingeringModifier extends VF.FretHandFinger {
         width: number,
         metrics: TextMetrics,
     ): void {
-        const inset: number = Math.min(1, width * 0.08);
-        const left: number = x + inset;
-        const right: number = x + width - inset;
+        ctx.setFont(this.fontInfo);
+        const digitRuns: string[] = this.text.split("\u2009").filter((run: string): boolean => run.length > 0);
+        const firstWidth: number = digitRuns.length > 0 ? ctx.measureText(digitRuns[0]).width : 0;
+        const lastWidth: number = digitRuns.length > 0
+            ? ctx.measureText(digitRuns[digitRuns.length - 1]).width
+            : 0;
+        const left: number = x + firstWidth / 2;
+        const right: number = x + width - lastWidth / 2;
         if (right <= left) {
             return;
         }
@@ -220,7 +226,7 @@ export class VexFlowFingeringModifier extends VF.FretHandFinger {
 
         ctx.save();
         ctx.strokeStyle = ctx.fillStyle;
-        ctx.setLineWidth(0.75);
+        ctx.setLineWidth(1);
         ctx.beginPath();
         ctx.moveTo(left, endY);
         ctx.bezierCurveTo(
