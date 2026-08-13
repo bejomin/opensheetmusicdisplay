@@ -3015,10 +3015,11 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
       }
     }
     for (const [, linkedSegments] of segmentsBySource) {
-      const linkedSystems: Set<MusicSystem> = new Set(
-        linkedSegments.map(({staffLine}): MusicSystem => staffLine.ParentMusicSystem),
-      );
-      if (linkedSystems.size > 1) {
+      // Cross-staff slurs have one graphical segment unless they cross a
+      // system boundary; segment construction already made that distinction.
+      // Avoid re-deriving it from browser-sensitive graphical-note lookups or
+      // parent-system object identity after vertical layout.
+      if (linkedSegments.length > 1) {
         this.calculateLinkedSlurGroup(linkedSegments, true);
         continue;
       }
