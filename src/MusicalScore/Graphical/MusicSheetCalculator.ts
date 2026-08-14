@@ -4050,9 +4050,18 @@ export abstract class MusicSheetCalculator {
         // find endstaffEntry and staffLine
         let endStaffEntry: GraphicalStaffEntry = undefined;
         let endStaffLine: StaffLine = undefined;
+        type LyricExtendContinuation = {
+            lastEntry: GraphicalStaffEntry;
+            lyricEntry?: GraphicalLyricEntry;
+        };
+        const continuationByStaffLine: Map<StaffLine, LyricExtendContinuation> = new Map();
         const staffIndex: number = startStaffEntry.parentMeasure.ParentStaff.idInMusicSheet;
         const lyricLineIdentity: string = lyricEntry.getLineIdentity();
+        const lyricFamilyIdentity: string = lyricEntry.getFamilyIdentity();
+        const lyricRole: string = lyricEntry.getLyricRole();
         const lyricVoice: Voice = lyricEntry.LyricsEntry.Parent?.ParentVoice;
+        const getMeasureIndex: (entry: GraphicalStaffEntry) => number =
+            (entry: GraphicalStaffEntry): number => entry.parentMeasure.parentSourceMeasure.measureListIndex;
         if (!startStaffEntry.parentVerticalContainer) {
             // shouldn't happen since calculateVerticalContainersList covers all measure.staffEntries,
             // but skip rather than crash if some upstream parsing left a staff entry without a container
@@ -4088,6 +4097,16 @@ export abstract class MusicSheetCalculator {
             if (!endStaffLine) {
                 endStaffLine = startStaffEntry.parentMeasure.ParentStaffLine;
             }
+            const continuation: LyricExtendContinuation = continuationByStaffLine.get(endStaffLine);
+            if (continuation) {
+                continuation.lastEntry = gse;
+                continuation.lyricEntry = nextLineEntry ?? continuation.lyricEntry;
+            } else {
+                continuationByStaffLine.set(endStaffLine, {
+                    lastEntry: gse,
+                    lyricEntry: nextLineEntry,
+                });
+            }
             if (nextLineEntry?.LyricsEntry.ExtendType === LyricExtendType.Stop) {
                 break;
             }
@@ -4095,6 +4114,19 @@ export abstract class MusicSheetCalculator {
         if (!endStaffEntry || !endStaffLine) {
             return;
         }
+        const getTerminalX: (entry: GraphicalStaffEntry) => number =
+            (entry: GraphicalStaffEntry): number => {
+                const noteheadRightOffset: number | undefined =
+                    entry.getNoteheadRightAnchorOffsetForVoice(lyricVoice);
+                const borderMarginRight: number = entry.PositionAndShape.BorderMarginRight;
+                const terminalOffset: number = Number.isFinite(noteheadRightOffset)
+                    ? noteheadRightOffset
+                    : borderMarginRight > 0
+                        ? borderMarginRight
+                        : this.rules.LyricsHeight / 2;
+                return entry.parentMeasure.PositionAndShape.RelativePosition.x +
+                    entry.PositionAndShape.RelativePosition.x + terminalOffset;
+            };
         // if on the same StaffLine
         if (startStaffLine === endStaffLine && endStaffEntry.parentMeasure.ParentStaffLine) {
             // start- and End margins from the text Labels
@@ -4102,9 +4134,7 @@ export abstract class MusicSheetCalculator {
                 startStaffEntry.PositionAndShape.RelativePosition.x;
             const startX: number = lyricEntry.getFootprint(startStaffEntryX).rightEdgeX;
             // + startStaffLine.PositionAndShape.AbsolutePosition.x; // doesn't work, done in drawer
-            const endX: number = endStaffEntry.parentMeasure.PositionAndShape.RelativePosition.x +
-                endStaffEntry.PositionAndShape.RelativePosition.x +
-                endStaffEntry.PositionAndShape.BorderMarginRight;
+            const endX: number = getTerminalX(endStaffEntry);
             // + endStaffLine.PositionAndShape.AbsolutePosition.x; // doesn't work, done in drawer
             // TODO maybe add half-width of following note.
             // though we don't have the vexflow note's bbox yet and extend layouting is unconstrained,
@@ -4113,7 +4143,8 @@ export abstract class MusicSheetCalculator {
             startY -= lyricEntry.GraphicalLabel.PositionAndShape.Size.height / 4;
             // create a Line (as underscore after the LyricLabel's End)
             this.calculateSingleLyricWordWithUnderscore(
-                startStaffLine, startX, endX, startY, lyricLineIdentity,
+                startStaffLine, startX, endX, startY,
+                lyricLineIdentity, lyricFamilyIdentity, lyricRole, getMeasureIndex(startStaffEntry),
             );
         } else { // start and end on different StaffLines
             // start margin from the text Label until the End of StaffLine
@@ -4127,23 +4158,48 @@ export abstract class MusicSheetCalculator {
             startY -= lyricEntry.GraphicalLabel.PositionAndShape.Size.height / 4;
             // first Underscore until the StaffLine's End
             this.calculateSingleLyricWordWithUnderscore(
-                startStaffLine, startX, endX, startY, lyricLineIdentity,
+                startStaffLine, startX, endX, startY,
+                lyricLineIdentity, lyricFamilyIdentity, lyricRole, getMeasureIndex(startStaffEntry),
             );
-            if (!endStaffEntry) {
-                return;
-            }
-            // second Underscore in the endStaffLine until endStaffEntry (if endStaffEntry isn't the first StaffEntry of the StaffLine))
-            if (endStaffEntry.parentMeasure.ParentStaffLine && endStaffEntry.parentMeasure.staffEntries &&
-                // the end staffline's first measure can be missing when it isn't laid out (e.g. a lazy/incremental render batch)
-                endStaffLine.Measures[0]?.staffEntries[0] &&
-                !(endStaffEntry === endStaffEntry.parentMeasure.staffEntries[0] &&
-                endStaffEntry.parentMeasure === endStaffEntry.parentMeasure.ParentStaffLine.Measures[0])) {
-                const secondStartX: number = endStaffLine.Measures[0].staffEntries[0].PositionAndShape.RelativePosition.x;
-                const secondEndX: number = endStaffEntry.parentMeasure.PositionAndShape.RelativePosition.x +
-                    endStaffEntry.PositionAndShape.RelativePosition.x +
-                    endStaffEntry.PositionAndShape.BorderMarginRight;
+            for (const [staffLine, continuation] of continuationByStaffLine) {
+                if (staffLine === startStaffLine) {
+                    continue;
+                }
+                // Continue from the system's first laid-out entry even when the
+                // tied terminal note is itself that entry. The old two-system
+                // special case skipped precisely that common engraving case.
+                const firstMeasure: GraphicalMeasure = staffLine.Measures[0];
+                const firstEntry: GraphicalStaffEntry = firstMeasure?.staffEntries.find(
+                    (entry: GraphicalStaffEntry): boolean => Number.isFinite(
+                        entry.getNoteheadLeftAnchorOffsetForVoice(lyricVoice),
+                    ),
+                ) ?? firstMeasure?.staffEntries[0];
+                if (!firstMeasure || !firstEntry) {
+                    continue;
+                }
+                const noteheadLeftOffset: number | undefined =
+                    firstEntry.getNoteheadLeftAnchorOffsetForVoice(lyricVoice);
+                const lineStartX: number = firstMeasure.PositionAndShape.RelativePosition.x +
+                    firstEntry.PositionAndShape.RelativePosition.x +
+                    (Number.isFinite(noteheadLeftOffset) ? noteheadLeftOffset : 0);
+                let lineEndX: number;
+                if (staffLine === endStaffLine) {
+                    lineEndX = getTerminalX(continuation.lastEntry);
+                } else {
+                    const lastMeasure: GraphicalMeasure = staffLine.Measures[staffLine.Measures.length - 1];
+                    lineEndX = lastMeasure.PositionAndShape.RelativePosition.x + lastMeasure.PositionAndShape.Size.width;
+                }
+                if (lineEndX <= lineStartX) {
+                    continue;
+                }
+                const continuationLabel: GraphicalLabel = continuation.lyricEntry?.GraphicalLabel;
+                const lineY: number = continuationLabel
+                    ? continuationLabel.PositionAndShape.RelativePosition.y -
+                        continuationLabel.PositionAndShape.Size.height / 4
+                    : startY;
                 this.calculateSingleLyricWordWithUnderscore(
-                    endStaffLine, secondStartX, secondEndX, startY, lyricLineIdentity,
+                    staffLine, lineStartX, lineEndX, lineY,
+                    lyricLineIdentity, lyricFamilyIdentity, lyricRole, getMeasureIndex(firstEntry),
                 );
             }
         }
@@ -4162,6 +4218,9 @@ export abstract class MusicSheetCalculator {
         endX: number,
         y: number,
         lyricLineIdentity: string,
+        lyricFamilyIdentity: string,
+        lyricRole: string,
+        lyricMeasureIndex: number,
     ): void {
         const lineStart: PointF2D = new PointF2D(startX, y);
         const lineEnd: PointF2D = new PointF2D(endX, y);
@@ -4178,6 +4237,9 @@ export abstract class MusicSheetCalculator {
         const graphicalLine: GraphicalLine = new GraphicalLine(lineStart, lineEnd, this.rules.LyricUnderscoreLineWidth);
         graphicalLine.colorHex = this.rules.DefaultColorLyrics; // if undefined, no change. saves an if check
         graphicalLine.LyricLineIdentity = lyricLineIdentity;
+        graphicalLine.LyricFamilyIdentity = lyricFamilyIdentity;
+        graphicalLine.LyricRole = lyricRole;
+        graphicalLine.LyricMeasureIndex = lyricMeasureIndex;
         staffLine.LyricLines.push(graphicalLine);
         if (this.staffLinesWithLyricWords.indexOf(staffLine) === -1) {
             this.staffLinesWithLyricWords.push(staffLine);

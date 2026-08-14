@@ -286,6 +286,8 @@ describe("LyricsReader semantics", () => {
                         PositionAndShape: positionAndShape,
                         LyricsEntries: [],
                         graphicalVoiceEntries: [],
+                        getNoteheadLeftAnchorOffsetForVoice: (): undefined => undefined,
+                        getNoteheadRightAnchorOffsetForVoice: (): undefined => undefined,
                         hasOnlyRests: (): boolean => false,
                     };
                     staffEntry.LyricsEntries.push(new GraphicalLyricEntry(

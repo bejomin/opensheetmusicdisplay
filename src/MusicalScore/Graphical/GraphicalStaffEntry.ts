@@ -83,6 +83,16 @@ export abstract class GraphicalStaffEntry extends GraphicalObject {
         return undefined;
     }
 
+    /** Renderer-specific right edge for the pitched noteheads in one voice. */
+    public getNoteheadRightAnchorOffsetForVoice(_voice: Voice): number | undefined {
+        return undefined;
+    }
+
+    /** Renderer-specific left edge for the pitched noteheads in one voice. */
+    public getNoteheadLeftAnchorOffsetForVoice(_voice: Voice): number | undefined {
+        return undefined;
+    }
+
     /**
      * Calculate the absolute Timestamp.
      * @returns {Fraction}

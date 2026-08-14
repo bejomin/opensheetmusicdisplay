@@ -742,14 +742,78 @@ describe("OpenSheetMusicDisplay Main Export", () => {
         const firstExtender: any =
             osmd.GraphicSheet.MusicPages[0].MusicSystems[0].StaffLines[0].LyricLines[0];
         expect(firstExtender.LyricLineIdentity).to.equal("verse:1");
-        expect((firstExtender.SVGElement as Element)?.getAttribute("data-osmd-lyric-line"))
-            .to.equal("verse:1");
+        const firstExtenderElement: Element = firstExtender.SVGElement as Element;
+        expect(firstExtenderElement?.getAttribute("data-osmd-lyric-line")).to.equal("verse:1");
+        expect(firstExtenderElement?.getAttribute("data-osmd-lyric-family")).to.equal("verse:1");
+        expect(firstExtenderElement?.getAttribute("data-osmd-lyric-role")).to.equal("source");
+        expect(firstExtenderElement?.getAttribute("data-osmd-lyric-system")).to.equal("0");
+        expect(firstExtenderElement?.getAttribute("data-osmd-lyric-staff")).to.equal("0");
+        expect(firstExtenderElement?.getAttribute("data-osmd-lyric-measure")).to.equal("0");
 
         osmd.render();
         expectStableVerticalGeometry(getLineGeometry(), firstGeometry, "second render extender");
         osmd.updateGraphic();
         osmd.render();
         expectStableVerticalGeometry(getLineGeometry(), firstGeometry, "rebuilt extender");
+    });
+
+    it("continues a tied lyric extender across every system", async (): Promise<void> => {
+        const xml: string = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list><score-part id="P1"><part-name>Voice</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef></attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>whole</type>
+        <tie type="start"/><notations><tied type="start"/></notations>
+        <lyric number="1"><syllabic>single</syllabic><text>held</text><extend type="start"/></lyric></note>
+    </measure>
+    <measure number="2">
+      <print new-system="yes"/>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>whole</type>
+        <tie type="stop"/><tie type="start"/><notations><tied type="stop"/><tied type="start"/></notations>
+        <lyric number="1"><extend type="continue"/></lyric></note>
+    </measure>
+    <measure number="3">
+      <print new-system="yes"/>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>whole</type>
+        <tie type="stop"/><notations><tied type="stop"/></notations>
+        <lyric number="1"><extend type="stop"/></lyric></note>
+    </measure>
+  </part>
+</score-partwise>`;
+        const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(
+            TestUtils.getDivElement(document),
+        );
+        await osmd.load(xml);
+        osmd.Sheet.Rules.NewSystemAtXMLNewSystemAttribute = true;
+        osmd.render();
+
+        const staffLines: any[] = osmd.GraphicSheet.MusicPages[0].MusicSystems.map(
+            (system: any): any => system.StaffLines[0],
+        );
+        expect(staffLines, "forced lyric systems").to.have.length(3);
+        expect(
+            staffLines.map((staffLine: any): number => staffLine.LyricLines.length),
+            "one extender segment per system",
+        ).to.deep.equal([1, 1, 1]);
+        for (const [systemIndex, staffLine] of staffLines.entries()) {
+            const extender: any = staffLine.LyricLines[0];
+            expect(extender.End.x, `system ${systemIndex + 1} extender length`).to.be.greaterThan(
+                extender.Start.x,
+            );
+            expect(extender.LyricLineIdentity).to.equal("verse:1");
+            expect(extender.LyricFamilyIdentity).to.equal("verse:1");
+            expect(extender.LyricRole).to.equal("source");
+            expect(extender.LyricMeasureIndex).to.equal(systemIndex);
+            const extenderElement: Element = extender.SVGElement as Element;
+            expect(extenderElement?.getAttribute("data-osmd-lyric-system"))
+                .to.equal(String(systemIndex));
+            expect(extenderElement?.getAttribute("data-osmd-lyric-staff")).to.equal("0");
+            expect(extenderElement?.getAttribute("data-osmd-lyric-measure"))
+                .to.equal(String(systemIndex));
+        }
     });
 
     it.skip("Timeout from server", (done: Mocha.Done) => {

@@ -21,6 +21,12 @@ export class GraphicalLine {
     public SVGElement: Node;
     /** Stable identity shared by a lyric label and its generated connectors. */
     public LyricLineIdentity: string;
+    /** Semantic lyric family shared by verses, choruses, and their translations. */
+    public LyricFamilyIdentity: string;
+    /** Source/translation role of the lyric that generated this connector. */
+    public LyricRole: string;
+    /** Source-measure index that owns this rendered lyric-connector segment. */
+    public LyricMeasureIndex: number;
 
     public get Start(): PointF2D {
         return this.start;

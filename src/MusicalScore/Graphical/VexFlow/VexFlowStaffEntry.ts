@@ -11,6 +11,7 @@ import { BoundingBox } from "../BoundingBox";
 import { LyricAlignmentMode } from "../../VoiceData/Lyrics/LyricsEntry";
 import { GraphicalFingeringEntry } from "../GraphicalFingeringEntry";
 import { VexFlowGraphicalNote } from "./VexFlowGraphicalNote";
+import { Voice } from "../../VoiceData/Voice";
 
 export class VexFlowStaffEntry extends GraphicalStaffEntry {
     constructor(measure: VexFlowMeasure, sourceStaffEntry: SourceStaffEntry, staffEntryParent: VexFlowStaffEntry) {
@@ -140,6 +141,56 @@ export class VexFlowStaffEntry extends GraphicalStaffEntry {
         const noteheadBeginXs: number[] = (this.graphicalVoiceEntries as VexFlowVoiceEntry[])
             .map((voiceEntry: VexFlowVoiceEntry): any => voiceEntry.vfStaveNote)
             .filter((staveNote: any): boolean => Boolean(staveNote) && !staveNote.isRest?.())
+            .map((staveNote: any): number => staveNote.getNoteHeadBeginX?.())
+            .filter((x: number): boolean => Number.isFinite(x));
+        if (noteheadBeginXs.length === 0) {
+            return undefined;
+        }
+        const anchorWithinMeasure: number =
+            (Math.min(...noteheadBeginXs) - stave.getX()) / unitInPixels;
+        return anchorWithinMeasure - this.PositionAndShape.RelativePosition.x;
+    }
+
+    /** Return the right edge of the rendered pitched noteheads for one voice. */
+    public override getNoteheadRightAnchorOffsetForVoice(
+        voice: Voice,
+        stave: VF.Stave = (this.parentMeasure as VexFlowMeasure).getVFStave(),
+    ): number | undefined {
+        const noteheadEndXs: number[] = (this.graphicalVoiceEntries as VexFlowVoiceEntry[])
+            .filter(
+                (voiceEntry: VexFlowVoiceEntry): boolean =>
+                    !voice || voiceEntry.parentVoiceEntry?.ParentVoice === voice,
+            )
+            .map((voiceEntry: VexFlowVoiceEntry): any => voiceEntry.vfStaveNote)
+            .filter(
+                (staveNote: any): boolean =>
+                    Boolean(staveNote?.tickContext) && !staveNote.isRest?.(),
+            )
+            .map((staveNote: any): number => staveNote.getNoteHeadEndX?.())
+            .filter((x: number): boolean => Number.isFinite(x));
+        if (noteheadEndXs.length === 0) {
+            return undefined;
+        }
+        const anchorWithinMeasure: number =
+            (Math.max(...noteheadEndXs) - stave.getX()) / unitInPixels;
+        return anchorWithinMeasure - this.PositionAndShape.RelativePosition.x;
+    }
+
+    /** Return the left edge of the rendered pitched noteheads for one voice. */
+    public override getNoteheadLeftAnchorOffsetForVoice(
+        voice: Voice,
+        stave: VF.Stave = (this.parentMeasure as VexFlowMeasure).getVFStave(),
+    ): number | undefined {
+        const noteheadBeginXs: number[] = (this.graphicalVoiceEntries as VexFlowVoiceEntry[])
+            .filter(
+                (voiceEntry: VexFlowVoiceEntry): boolean =>
+                    !voice || voiceEntry.parentVoiceEntry?.ParentVoice === voice,
+            )
+            .map((voiceEntry: VexFlowVoiceEntry): any => voiceEntry.vfStaveNote)
+            .filter(
+                (staveNote: any): boolean =>
+                    Boolean(staveNote?.tickContext) && !staveNote.isRest?.(),
+            )
             .map((staveNote: any): number => staveNote.getNoteHeadBeginX?.())
             .filter((x: number): boolean => Number.isFinite(x));
         if (noteheadBeginXs.length === 0) {

@@ -468,8 +468,20 @@ export abstract class MusicSheetDrawer {
             lyricLine.SVGElement = this.drawGraphicalLine(
                 absoluteLine, this.rules.LyricUnderscoreLineWidth, lyricLine.colorHex,
             );
-            (lyricLine.SVGElement as Element)?.setAttribute?.(
-                "data-osmd-lyric-line", lyricLine.LyricLineIdentity,
+            const lyricLineElement: Element = lyricLine.SVGElement as Element;
+            lyricLineElement?.setAttribute?.("data-osmd-lyric-line", lyricLine.LyricLineIdentity);
+            lyricLineElement?.setAttribute?.("data-osmd-lyric-family", lyricLine.LyricFamilyIdentity);
+            lyricLineElement?.setAttribute?.("data-osmd-lyric-role", lyricLine.LyricRole);
+            if (Number.isInteger(lyricLine.LyricMeasureIndex)) {
+                lyricLineElement?.setAttribute?.(
+                    "data-osmd-lyric-measure", String(lyricLine.LyricMeasureIndex),
+                );
+            }
+            lyricLineElement?.setAttribute?.(
+                "data-osmd-lyric-system", String(staffLine?.ParentMusicSystem?.Id ?? 0),
+            );
+            lyricLineElement?.setAttribute?.(
+                "data-osmd-lyric-staff", String(staffLine?.ParentStaff?.idInMusicSheet ?? 0),
             );
         });
     }
