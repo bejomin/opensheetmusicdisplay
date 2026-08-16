@@ -4062,6 +4062,23 @@ export abstract class MusicSheetCalculator {
         const lyricVoice: Voice = lyricEntry.LyricsEntry.Parent?.ParentVoice;
         const getMeasureIndex: (entry: GraphicalStaffEntry) => number =
             (entry: GraphicalStaffEntry): number => entry.parentMeasure.parentSourceMeasure.measureListIndex;
+        const findVisibleLyricEntry: (staffLine: StaffLine) => GraphicalLyricEntry | undefined =
+            (staffLine: StaffLine): GraphicalLyricEntry | undefined => {
+                for (const measure of staffLine.Measures) {
+                    for (const staffEntry of measure.staffEntries) {
+                        const match: GraphicalLyricEntry = staffEntry.LyricsEntries.find(
+                            (candidate: GraphicalLyricEntry): boolean =>
+                                candidate.getLineIdentity() === lyricLineIdentity &&
+                                candidate.LyricsEntry.Parent?.ParentVoice === lyricVoice &&
+                                Boolean(candidate.LyricsEntry.LyricText?.trim()),
+                        );
+                        if (match) {
+                            return match;
+                        }
+                    }
+                }
+                return undefined;
+            };
         if (!startStaffEntry.parentVerticalContainer) {
             // shouldn't happen since calculateVerticalContainersList covers all measure.staffEntries,
             // but skip rather than crash if some upstream parsing left a staff entry without a container
@@ -4192,11 +4209,30 @@ export abstract class MusicSheetCalculator {
                 if (lineEndX <= lineStartX) {
                     continue;
                 }
-                const continuationLabel: GraphicalLabel = continuation.lyricEntry?.GraphicalLabel;
+                // An extend-only lyric has an empty label with no useful text
+                // height. Use a visible lyric from this system to keep the
+                // incoming segment on the same baseline as the rest of its
+                // verse. Its generated stanza number normally hangs from that
+                // later lyric; move the number into the leading margin so the
+                // visual order is number, incoming extender, then lyric text.
+                const visibleLyricEntry: GraphicalLyricEntry = findVisibleLyricEntry(staffLine);
+                const continuationLabel: GraphicalLabel =
+                    visibleLyricEntry?.GraphicalLabel ?? continuation.lyricEntry?.GraphicalLabel;
+                const continuationLabelHeight: number = continuationLabel?.PositionAndShape.Size.height > 0
+                    ? continuationLabel.PositionAndShape.Size.height
+                    : lyricEntry.GraphicalLabel.PositionAndShape.Size.height;
                 const lineY: number = continuationLabel
-                    ? continuationLabel.PositionAndShape.RelativePosition.y -
-                        continuationLabel.PositionAndShape.Size.height / 4
+                    ? continuationLabel.PositionAndShape.RelativePosition.y - continuationLabelHeight / 4
                     : startY;
+                if (visibleLyricEntry?.GraphicalStanzaNumberLabel) {
+                    const visibleStaffEntry: GraphicalStaffEntry = visibleLyricEntry.StaffEntryParent;
+                    const visibleStaffEntryX: number = visibleStaffEntry.parentMeasure.PositionAndShape.RelativePosition.x +
+                        visibleStaffEntry.PositionAndShape.RelativePosition.x;
+                    visibleLyricEntry.setStanzaNumberColumnRight(
+                        lineStartX - this.rules.LyricsStanzaNumberGap,
+                        visibleStaffEntryX,
+                    );
+                }
                 this.calculateSingleLyricWordWithUnderscore(
                     staffLine, lineStartX, lineEndX, lineY,
                     lyricLineIdentity, lyricFamilyIdentity, lyricRole, getMeasureIndex(firstEntry),

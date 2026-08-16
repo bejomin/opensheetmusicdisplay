@@ -816,6 +816,73 @@ describe("OpenSheetMusicDisplay Main Export", () => {
         }
     });
 
+    it("aligns incoming lyric extenders after the local stanza number", async (): Promise<void> => {
+        const xml: string = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list><score-part id="P1"><part-name>Voice</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef></attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>whole</type>
+        <tie type="start"/><notations><tied type="start"/></notations>
+        <lyric number="1"><syllabic>single</syllabic><text>held</text><extend type="start"/></lyric>
+        <lyric number="2"><syllabic>single</syllabic><text>kept</text><extend type="start"/></lyric></note>
+    </measure>
+    <measure number="2">
+      <print new-system="yes"/>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><voice>1</voice><type>quarter</type>
+        <tie type="stop"/><notations><tied type="stop"/></notations>
+        <lyric number="1"><extend type="stop"/></lyric>
+        <lyric number="2"><extend type="stop"/></lyric></note>
+      <note><pitch><step>D</step><octave>4</octave></pitch><duration>3</duration><voice>1</voice><type>half</type><dot/>
+        <lyric number="1"><syllabic>single</syllabic><text>next</text></lyric>
+        <lyric number="2"><syllabic>single</syllabic><text>after</text></lyric></note>
+    </measure>
+  </part>
+</score-partwise>`;
+        const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(
+            TestUtils.getDivElement(document),
+        );
+        await osmd.load(xml);
+        osmd.Sheet.Rules.NewSystemAtXMLNewSystemAttribute = true;
+        osmd.render();
+
+        const staffLine: any = osmd.GraphicSheet.MusicPages[0].MusicSystems[1].StaffLines[0];
+        expect(staffLine.LyricLines, "one incoming extender per verse").to.have.length(2);
+        for (const verseNumber of ["1", "2"]) {
+            const lineIdentity: string = `verse:${verseNumber}`;
+            const extender: any = staffLine.LyricLines.find(
+                (line: any): boolean => line.LyricLineIdentity === lineIdentity,
+            );
+            const visibleEntry: any = staffLine.Measures.flatMap(
+                (measure: any): any[] => measure.staffEntries,
+            ).flatMap(
+                (candidateStaffEntry: any): any[] => candidateStaffEntry.LyricsEntries,
+            ).find(
+                (entry: any): boolean => entry.getLineIdentity() === lineIdentity &&
+                    Boolean(entry.LyricsEntry.LyricText?.trim()),
+            );
+            expect(extender, `${lineIdentity} incoming extender`).not.to.equal(undefined);
+            expect(visibleEntry, `${lineIdentity} visible lyric`).not.to.equal(undefined);
+            expect(extender.Start.y, `${lineIdentity} local baseline`).to.be.closeTo(
+                visibleEntry.GraphicalLabel.PositionAndShape.RelativePosition.y -
+                    visibleEntry.GraphicalLabel.PositionAndShape.Size.height / 4,
+                0.000001,
+            );
+
+            const stanzaLabel: any = visibleEntry.GraphicalStanzaNumberLabel;
+            const staffEntry: any = visibleEntry.StaffEntryParent;
+            const staffEntryX: number = staffEntry.parentMeasure.PositionAndShape.RelativePosition.x +
+                staffEntry.PositionAndShape.RelativePosition.x;
+            const stanzaRight: number = staffEntryX + stanzaLabel.PositionAndShape.RelativePosition.x +
+                stanzaLabel.PositionAndShape.BorderRight;
+            expect(stanzaRight, `${lineIdentity} stanza number before extender`).to.be.lessThan(
+                extender.Start.x,
+            );
+        }
+    });
+
     it.skip("Timeout from server", (done: Mocha.Done) => {
         // TODO this test times out from time to time, even with osmd.loadUrlTimeout set to 5000.
         //   the test is unreliable, which makes it hard to test.
