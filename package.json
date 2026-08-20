@@ -14,6 +14,7 @@
     "test:font-bundles": "node scripts/check-font-bundles.mjs",
     "test:ch-songbook-bundle": "node scripts/check-ch-songbook-bundle.mjs",
     "test:layout-corpus": "node --test scripts/render-layout-corpus.test.mjs",
+    "test:visual:comparator": "node --test test/Util/visualRegression.test.mjs",
     "render:layout-corpus": "node scripts/render-layout-corpus.mjs --input test/data --renderer current=build/opensheetmusicdisplay.min.js --output build/layout-corpus --widths 1200 --annotations stage6 --title \"OSMD full annotated layout corpus\" --gallery paged --workers 2",
     "prepare": "node scripts/prepare.mjs",
     "build": "npm run lint && npm run build:webpack",
@@ -39,11 +40,14 @@
     "generate:current:debug": "node ./test/Util/generateImages_browserless.mjs ../../build ./test/data ./visual_regression/current png 0 0 allSmall --debugosmdtesting",
     "generate:current:singletest": "node test/Util/generateImages_browserless.mjs ../../build ./test/data ./visual_regression/current png 0 0 ^Beethoven --osmdtestingsingle",
     "generate:blessed": "node ./test/Util/generateImages_browserless.mjs ../../build ./test/data ./visual_regression/blessed png 0 0 allSmall --osmdtesting",
-    "test:visual": "bash ./test/Util/visual_regression.sh ./visual_regression",
+    "test:visual": "node ./test/Util/visualRegression.mjs ./visual_regression",
+    "test:visual:old": "bash ./test/Util/visual_regression.sh ./visual_regression",
     "test:visual:build": "npm run build:webpack && npm run generate:current && npm run test:visual",
+    "test:visual:build:old": "npm run build:webpack && npm run generate:current && npm run test:visual:old",
     "test:visual:build:batch": "npm run build:webpack && npm run generate:current:batch && npm run test:visual",
     "test:visual:build:webgl": "npm run build:webpack && npm run generate:current:webgl && npm run test:visual",
-    "test:visual:singletest": "sh ./test/Util/visual_regression.sh ./visual_regression Beethoven"
+    "test:visual:singletest": "node ./test/Util/visualRegression.mjs ./visual_regression Beethoven",
+    "test:visual:singletest:old": "sh ./test/Util/visual_regression.sh ./visual_regression Beethoven"
   },
   "pre-commit": [
     "lint"

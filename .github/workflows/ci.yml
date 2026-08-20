@@ -49,6 +49,9 @@ jobs:
         env:
           CI: true
 
+      - name: Test visual-regression comparator
+        run: npm run test:visual:comparator
+
       - name: Build CH Songbook package target
         if: matrix.node-version == '26.x'
         run: npm run build:ch-songbook

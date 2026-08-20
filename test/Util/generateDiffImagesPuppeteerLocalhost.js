@@ -14,7 +14,7 @@
   inspired by Vexflow's generate_png_images and vexflow-tests.js
 
   This is meant to be used with the visual regression test system in
-  `tools/visual_regression.sh`.
+  `test/Util/visualRegression.mjs`.
 */
 
 function sleep (ms) {

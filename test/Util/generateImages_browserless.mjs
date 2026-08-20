@@ -12,7 +12,7 @@ import OSMD from "../../build/opensheetmusicdisplay.min.js"; // window needs to 
 
   This can be used to generate PNGs or SVGs from OSMD without a browser.
   It's also used with the visual regression test system (using PNGs) in
-  `tools/visual_regression.sh`
+  `test/Util/visualRegression.mjs`
   (see package.json, used with npm run generate:blessed and generate:current, then test:visual).
 
   Note: this script needs to "fake" quite a few browser elements, like window, document,
