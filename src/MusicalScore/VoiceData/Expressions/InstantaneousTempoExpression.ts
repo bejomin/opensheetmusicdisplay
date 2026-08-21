@@ -179,6 +179,10 @@ export class InstantaneousTempoExpression extends AbstractTempoExpression {
     /** This is `none` unless `TempoType` is `change`. */
     public ChangeSubType: ChangeSubType;
     private tempoInBpm: number;
+    /** Numeric MusicXML playback tempo normalized to quarter notes per minute.
+     * Undefined for text-only tempo expressions, which must not imply playback speed.
+     */
+    private explicitPlaybackTempoInQuarterBpm: number;
 
     // Must refactor: In c# use 'out' arguments
     //private findTempoEnum(inputString: string, pre: string, post: string): TempoEnum {
@@ -304,6 +308,12 @@ export class InstantaneousTempoExpression extends AbstractTempoExpression {
     }
     public set TempoInBpm(value: number) {
         this.tempoInBpm = value;
+    }
+    public get ExplicitPlaybackTempoInQuarterBpm(): number {
+        return this.explicitPlaybackTempoInQuarterBpm;
+    }
+    public set ExplicitPlaybackTempoInQuarterBpm(value: number) {
+        this.explicitPlaybackTempoInQuarterBpm = value;
     }
     public get ParentMultiTempoExpression(): MultiTempoExpression {
         return this.parentMultiTempoExpression;

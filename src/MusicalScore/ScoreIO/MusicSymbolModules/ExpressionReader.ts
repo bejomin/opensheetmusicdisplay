@@ -160,6 +160,7 @@ export class ExpressionReader {
                 inSourceMeasureCurrentFraction: Fraction, inSourceMeasurePreviousFraction: Fraction = undefined): void {
         let isTempoInstruction: boolean = false;
         let isDynamicInstruction: boolean = false;
+        let explicitPlaybackTempoAdded: boolean = false;
 
         const timestampFraction: Fraction = inSourceMeasureCurrentFraction.clone();
         const offsetNode: IXmlElement = directionNode.element("offset");
@@ -178,7 +179,7 @@ export class ExpressionReader {
                 // const match: string[] = tempoAttr.value.match(/^(\d+\.?\d{0,9}|\.\d{1,9})$/);
                 const match: string[] = tempoAttr.value.match(/^(\d+)(\.\d+)?$/);
                 if (match?.length > 0) {
-                    this.soundTempo = Math.round(Number.parseFloat(tempoAttr.value));
+                    this.soundTempo = Number.parseFloat(tempoAttr.value);
                 } else {
                     log.info("invalid xml tempo: " + tempoAttr.value);
                     this.soundTempo = 100;
@@ -228,6 +229,7 @@ export class ExpressionReader {
                         const bpmMatch: RegExpMatchArray = bpm.value.match(/(\d+\.?\d*)/);
                         const bpmNumber: number = bpmMatch ? parseFloat(bpmMatch[1]) : NaN;
                         this.createNewTempoExpressionIfNeeded(currentMeasure);
+                        const soundTempo: number = isTempoInstruction ? this.soundTempo : undefined;
                         const instantaneousTempoExpression: InstantaneousTempoExpression =
                             new InstantaneousTempoExpression(undefined,
                                                              this.placement,
@@ -236,6 +238,9 @@ export class ExpressionReader {
                                                              this.currentMultiTempoExpression,
                                                              true);
                         instantaneousTempoExpression.parentMeasure = currentMeasure;
+                        instantaneousTempoExpression.ExplicitPlaybackTempoInQuarterBpm = soundTempo > 0
+                            ? soundTempo
+                            : ExpressionReader.metronomeQuarterBpm(beatUnit.value, bpmNumber, dotted ? 1 : 0);
                         this.soundTempo = bpmNumber;
                         // make sure to take dotted beats into account
                         currentMeasure.TempoInBPM = this.soundTempo * (dotted?1.5:1);
@@ -247,6 +252,7 @@ export class ExpressionReader {
                         instantaneousTempoExpression.beatUnit = beatUnit.value;
                         this.currentMultiTempoExpression.addExpression(instantaneousTempoExpression, "");
                         this.currentMultiTempoExpression.CombinedExpressionsText = "test";
+                        explicitPlaybackTempoAdded = true;
                     }
                 }
                 continue;
@@ -266,7 +272,9 @@ export class ExpressionReader {
                     this.currentMultiTempoExpression.CombinedExpressionsText = dirContentNode.value;
                     const instantaneousTempoExpression: InstantaneousTempoExpression = new InstantaneousTempoExpression(
                         dirContentNode.value, this.placement, this.staffNumber, this.soundTempo, this.currentMultiTempoExpression);
+                    instantaneousTempoExpression.ExplicitPlaybackTempoInQuarterBpm = this.soundTempo;
                     this.currentMultiTempoExpression.addExpression(instantaneousTempoExpression, "");
+                    explicitPlaybackTempoAdded = true;
                 } else if (!isDynamicInstruction) {
                     this.interpretWords(dirContentNode, currentMeasure, timestampFraction);
                 }
@@ -284,6 +292,14 @@ export class ExpressionReader {
                 this.interpretRehearsalMark(dirContentNode, currentMeasure, inSourceMeasureCurrentFraction, currentMeasure.MeasureNumber);
                 continue;
             }
+        }
+        if (isTempoInstruction && !explicitPlaybackTempoAdded) {
+            this.createNewTempoExpressionIfNeeded(currentMeasure);
+            const instantaneousTempoExpression: InstantaneousTempoExpression = new InstantaneousTempoExpression(
+                undefined, this.placement, this.staffNumber, this.soundTempo, this.currentMultiTempoExpression);
+            instantaneousTempoExpression.parentMeasure = currentMeasure;
+            instantaneousTempoExpression.ExplicitPlaybackTempoInQuarterBpm = this.soundTempo;
+            this.currentMultiTempoExpression.addExpression(instantaneousTempoExpression, "");
         }
     }
     /** Usually called at end of last measure. */
@@ -508,6 +524,24 @@ export class ExpressionReader {
         this.soundTempo = 0;
         this.soundDynamic = 0;
         this.offsetDivisions = 0;
+    }
+    private static metronomeQuarterBpm(beatUnit: string, perMinute: number, dots: number): number {
+        const quarterLengths: {[beatUnit: string]: number} = {
+            maxima: 32, long: 16, breve: 8, whole: 4, half: 2, quarter: 1,
+            eighth: 0.5, "16th": 0.25, "32nd": 0.125, "64th": 0.0625,
+            "128th": 0.03125, "256th": 0.015625, "512th": 0.0078125, "1024th": 0.00390625,
+        };
+        const base: number = quarterLengths[String(beatUnit || "").trim().toLowerCase()];
+        if (!base || !Number.isFinite(perMinute) || perMinute <= 0) {
+            return undefined;
+        }
+        let dotMultiplier: number = 1;
+        let addition: number = 0.5;
+        for (let index: number = 0; index < dots; index++) {
+            dotMultiplier += addition;
+            addition /= 2;
+        }
+        return perMinute * base * dotMultiplier;
     }
     private readPlacement(node: IXmlElement): PlacementEnum {
         const value: string = node.attribute("placement")?.value;
