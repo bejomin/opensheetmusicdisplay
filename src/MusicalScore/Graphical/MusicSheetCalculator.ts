@@ -2270,6 +2270,10 @@ export abstract class MusicSheetCalculator {
 
             // const addAtLastList: GraphicalObject[] = [];
             for (const entry of multiTempoExpression.EntriesList) {
+                if (entry.Expression instanceof InstantaneousTempoExpression &&
+                    !entry.Expression.Label && !entry.Expression.isMetronomeMark) {
+                    continue;
+                }
                 let textAlignment: TextAlignmentEnum = this.rules.TempoExpressionTextAlignment;
                 if (this.rules.CompactMode) {
                     textAlignment = TextAlignmentEnum.LeftBottom;

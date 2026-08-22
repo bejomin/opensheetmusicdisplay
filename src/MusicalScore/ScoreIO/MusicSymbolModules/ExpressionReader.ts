@@ -302,6 +302,42 @@ export class ExpressionReader {
             this.currentMultiTempoExpression.addExpression(instantaneousTempoExpression, "");
         }
     }
+    /** Read a measure-level MusicXML sound tempo, including its optional divisions-based offset.
+     * Dorico uses this form for the invisible intermediate steps of gradual tempo changes.
+     */
+    public readStandaloneSoundTempo(soundNode: IXmlElement, currentMeasure: SourceMeasure,
+                                    inSourceMeasureCurrentFraction: Fraction, divisions: number): void {
+        const tempoAttribute: IXmlAttribute = soundNode.attribute("tempo");
+        if (!tempoAttribute) {
+            return;
+        }
+        const tempo: number = Number.parseFloat(tempoAttribute.value);
+        if (!Number.isFinite(tempo) || tempo <= 0) {
+            log.info("invalid xml tempo: " + tempoAttribute.value);
+            return;
+        }
+
+        const timestamp: Fraction = Fraction.createFromFraction(inSourceMeasureCurrentFraction);
+        const offsetNode: IXmlElement = soundNode.element("offset");
+        const offsetDivisions: number = Number.parseInt(offsetNode?.value, 10);
+        if (Number.isFinite(offsetDivisions) && divisions > 0) {
+            timestamp.Add(new Fraction(offsetDivisions, divisions * 4));
+        }
+
+        this.directionTimestamp = timestamp;
+        this.soundTempo = tempo;
+        currentMeasure.TempoInBPM = tempo;
+        if (this.musicSheet.DefaultStartTempoInBpm === 0) {
+            this.musicSheet.DefaultStartTempoInBpm = tempo;
+        }
+        this.musicSheet.HasBPMInfo = true;
+        this.createNewTempoExpressionIfNeeded(currentMeasure);
+        const instantaneousTempoExpression: InstantaneousTempoExpression = new InstantaneousTempoExpression(
+            undefined, PlacementEnum.Above, this.staffNumber, tempo, this.currentMultiTempoExpression);
+        instantaneousTempoExpression.parentMeasure = currentMeasure;
+        instantaneousTempoExpression.ExplicitPlaybackTempoInQuarterBpm = tempo;
+        this.currentMultiTempoExpression.addExpression(instantaneousTempoExpression, "");
+    }
     /** Usually called at end of last measure. */
     public closeOpenExpressions(sourceMeasure: SourceMeasure, timestamp: Fraction): void {
         for (const openCont of this.openContinuousDynamicExpressions) {

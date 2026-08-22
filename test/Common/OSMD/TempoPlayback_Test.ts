@@ -59,4 +59,34 @@ describe("explicit MusicXML playback tempo", () => {
                 .InstantaneousTempo.ExplicitPlaybackTempoInQuarterBpm,
         ).to.equal(96);
     });
+
+    it("reads offset measure-level sound tempos used for gradual playback", async () => {
+        const xml: string = `<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0">
+          <part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list>
+          <part id="P1"><measure number="1">
+            <attributes><divisions>4</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+            <note><rest/><duration>16</duration><type>whole</type></note>
+            <backup><duration>16</duration></backup>
+            <sound tempo="120"/>
+            <sound tempo="90"><offset>4</offset></sound>
+            <sound tempo="60"><offset>8</offset></sound>
+          </measure></part>
+        </score-partwise>`;
+        const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(
+            TestUtils.getDivElement(document),
+        );
+
+        await osmd.load(xml);
+
+        const tempoMap: Array<{ tempo: number, timestamp: number }> =
+            osmd.Sheet.TimestampSortedTempoExpressionsList.map(expression => ({
+                tempo: expression.InstantaneousTempo?.ExplicitPlaybackTempoInQuarterBpm,
+                timestamp: expression.AbsoluteTimestamp.RealValue,
+            }));
+        expect(tempoMap).to.deep.equal([
+            { tempo: 120, timestamp: 0 },
+            { tempo: 90, timestamp: 0.25 },
+            { tempo: 60, timestamp: 0.5 },
+        ]);
+    });
 });

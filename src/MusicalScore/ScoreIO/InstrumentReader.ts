@@ -528,21 +528,10 @@ export class InstrumentReader {
           }
           // TODO do we need to process bars with left location too?
         } else if (xmlNode.name === "sound") {
-          // (*) MetronomeReader.readTempoInstruction(xmlNode, this.musicSheet, this.currentXmlMeasureIndex);
-          try {
-            if (xmlNode.attribute("tempo")) { // can be null, not just undefined!
-
-                const tempo: number = parseFloat(xmlNode.attribute("tempo").value);
-
-                // should set the PlaybackSettings only at first Measure
-                if (this.currentXmlMeasureIndex === 0) {
-                    this.musicSheet.DefaultStartTempoInBpm = tempo;
-                    this.musicSheet.HasBPMInfo = true;
-                }
-            }
-          } catch (e) {
-            log.debug("InstrumentReader.readTempoInstruction", e);
-          }
+          const expressionReader: ExpressionReader = this.expressionReaders[0];
+          expressionReader?.readStandaloneSoundTempo(
+            xmlNode, this.currentMeasure, currentFraction, this.divisions
+          );
         } else if (xmlNode.name === "harmony") {
           const noteStaff: number = this.getNoteStaff(xmlNode);
           this.currentStaff = this.instrument.Staves[noteStaff - 1];
