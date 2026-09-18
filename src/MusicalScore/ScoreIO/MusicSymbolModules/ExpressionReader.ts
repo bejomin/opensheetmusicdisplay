@@ -211,6 +211,10 @@ export class ExpressionReader {
             }
         }
         const dirNodes: IXmlElement[] = directionNode.elements("direction-type");
+        const containsMetronomeMark: boolean = dirNodes.some(
+            (dirNode: IXmlElement): boolean => dirNode.element("metronome") !== undefined,
+        );
+        const metronomeText: string = containsMetronomeMark ? directionText.trim() || undefined : undefined;
         for (const dirNode of dirNodes) {
             let dirContentNode: IXmlElement = dirNode.element("metronome");
             if (dirContentNode) {
@@ -220,7 +224,7 @@ export class ExpressionReader {
                 if (metronomeNotes.length > 0 && metronomeRelation) {
                     // Complex metronome mark (note equation, e.g. swing notation)
                     this.parseComplexMetronomeMark(dirContentNode, metronomeNotes, metronomeRelation,
-                                                   currentMeasure, timestampFraction);
+                                                   currentMeasure, timestampFraction, metronomeText);
                 } else {
                     // Simple metronome mark: beat-unit = BPM
                     // TODO handle two <beat-unit> elements without <per-minute> (simple note equation,
@@ -262,6 +266,9 @@ export class ExpressionReader {
                         this.musicSheet.HasBPMInfo = true;
                         instantaneousTempoExpression.dotted = dotted;
                         instantaneousTempoExpression.beatUnit = beatUnit.value;
+                        instantaneousTempoExpression.metronomeText = metronomeText;
+                        instantaneousTempoExpression.metronomeParentheses =
+                            dirContentNode.attribute("parentheses")?.value === "yes";
                         this.currentMultiTempoExpression.addExpression(instantaneousTempoExpression, "");
                         this.currentMultiTempoExpression.CombinedExpressionsText = "test";
                         explicitPlaybackTempoAdded = true;
@@ -279,6 +286,12 @@ export class ExpressionReader {
 
             dirContentNode = dirNode.element("words");
             if (dirContentNode) {
+                // Words in the same MusicXML direction form one visual instruction with the
+                // metronome mark. StaveTempo renders the text first and the mark second, while
+                // the metronome value alone remains authoritative for playback.
+                if (containsMetronomeMark) {
+                    continue;
+                }
                 if (isTempoInstruction) {
                     this.createNewTempoExpressionIfNeeded(currentMeasure);
                     this.currentMultiTempoExpression.CombinedExpressionsText = dirContentNode.value;
@@ -636,7 +649,8 @@ export class ExpressionReader {
     /** Parse a complex metronome mark with metronome-note elements and a metronome-relation (e.g. swing notation). */
     private parseComplexMetronomeMark(metronomeNode: IXmlElement, metronomeNotes: IXmlElement[],
                                       metronomeRelationNode: IXmlElement,
-                                      currentMeasure: SourceMeasure, timestampFraction: Fraction): void {
+                                      currentMeasure: SourceMeasure, timestampFraction: Fraction,
+                                      metronomeText: string = undefined): void {
         const useCurrentFractionForPositioning: boolean =
             (metronomeNode.hasAttributes && metronomeNode.attribute("default-x") !== undefined);
         if (useCurrentFractionForPositioning) {
@@ -715,6 +729,8 @@ export class ExpressionReader {
         instantaneousTempoExpression.metronomeNoteGroupLeft = leftGroup;
         instantaneousTempoExpression.metronomeNoteGroupRight = rightGroup;
         instantaneousTempoExpression.metronomeRelation = metronomeRelationNode.value;
+        instantaneousTempoExpression.metronomeText = metronomeText;
+        instantaneousTempoExpression.metronomeParentheses = metronomeNode.attribute("parentheses")?.value === "yes";
 
         if (this.musicSheet.DefaultStartTempoInBpm === 0) {
             this.musicSheet.DefaultStartTempoInBpm = this.soundTempo;

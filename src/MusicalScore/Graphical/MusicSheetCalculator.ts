@@ -61,7 +61,7 @@ import { PlacementEnum } from "../VoiceData/Expressions/AbstractExpression";
 import { getDefaultTextFontFamily } from "./ScoreTextFontRouting";
 import { AbstractGraphicalInstruction } from "./AbstractGraphicalInstruction";
 import { GraphicalInstantaneousTempoExpression } from "./GraphicalInstantaneousTempoExpression";
-import { InstantaneousTempoExpression, TempoType } from "../VoiceData/Expressions/InstantaneousTempoExpression";
+import { InstantaneousTempoExpression } from "../VoiceData/Expressions/InstantaneousTempoExpression";
 import { ContinuousTempoExpression } from "../VoiceData/Expressions/ContinuousExpressions/ContinuousTempoExpression";
 import { FontStyles } from "../../Common/Enums/FontStyles";
 import { AbstractTempoExpression } from "../VoiceData/Expressions/AbstractTempoExpression";
@@ -2274,6 +2274,12 @@ export abstract class MusicSheetCalculator {
                     !entry.Expression.Label && !entry.Expression.isMetronomeMark) {
                     continue;
                 }
+                if (entry.Expression instanceof InstantaneousTempoExpression && entry.Expression.isMetronomeMark) {
+                    if (this.rules.MetronomeMarksDrawn) {
+                        this.createMetronomeMark(entry.Expression, staffLine, relative);
+                    }
+                    continue;
+                }
                 let textAlignment: TextAlignmentEnum = this.rules.TempoExpressionTextAlignment;
                 if (this.rules.CompactMode) {
                     textAlignment = TextAlignmentEnum.LeftBottom;
@@ -2307,13 +2313,6 @@ export abstract class MusicSheetCalculator {
                         // all graphical expression creations should be in one place and have basic stuff like labels, lines, ...
                         // in their constructor
                     }
-                    // in case of metronome mark:
-                    if (this.rules.MetronomeMarksDrawn) {
-                        if ((entry.Expression as InstantaneousTempoExpression).TempoType === TempoType.metronomeMark) {
-                            this.createMetronomeMark((entry.Expression as InstantaneousTempoExpression));
-                            continue;
-                        }
-                    }
                 } else if (entry.Expression instanceof ContinuousTempoExpression) {
                     for (const expr of staffLine.AbstractExpressions) {
                         if (expr instanceof GraphicalInstantaneousTempoExpression &&
@@ -2330,7 +2329,8 @@ export abstract class MusicSheetCalculator {
         }
     }
 
-    protected createMetronomeMark(metronomeExpression: InstantaneousTempoExpression): void {
+    protected createMetronomeMark(metronomeExpression: InstantaneousTempoExpression,
+                                  staffLine: StaffLine, relative: PointF2D): void {
         throw new Error(this.abstractNotImplementedErrorMessage);
     }
 

@@ -14,6 +14,109 @@ function explicitTempoMap(osmd: OpenSheetMusicDisplay): Array<{ tempo: number, t
 }
 
 describe("explicit MusicXML playback tempo", () => {
+    it("keeps sibling tempo words with their metronome mark without deriving playback from the words", async () => {
+        const xml: string = `<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0">
+          <part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list>
+          <part id="P1"><measure number="1">
+            <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+            <direction placement="above">
+              <direction-type><metronome parentheses="yes">
+                <beat-unit>half</beat-unit><beat-unit-dot/><per-minute>46</per-minute>
+              </metronome></direction-type>
+              <direction-type><words>Slower</words></direction-type>
+              <sound tempo="90"/>
+            </direction>
+            <note><rest/><duration>4</duration><type>whole</type></note>
+          </measure></part>
+        </score-partwise>`;
+        const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(
+            TestUtils.getDivElement(document),
+        );
+
+        await osmd.load(xml);
+
+        const entries: any[] = osmd.Sheet.SourceMeasures[0].TempoExpressions[0].EntriesList;
+        const expression: any = entries[0].Expression;
+        expect(entries).to.have.length(1);
+        expect(expression.isMetronomeMark).to.equal(true);
+        expect(expression.metronomeText).to.equal("Slower");
+        expect(expression.metronomeParentheses).to.equal(true);
+        expect(expression.ExplicitPlaybackTempoInQuarterBpm).to.equal(90);
+    });
+
+    it("does not merge tempo words from a separate MusicXML direction into a metronome mark", async () => {
+        const xml: string = `<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0">
+          <part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list>
+          <part id="P1"><measure number="1">
+            <attributes><divisions>1</divisions></attributes>
+            <direction><direction-type><words>Andante</words></direction-type></direction>
+            <direction><direction-type><metronome>
+              <beat-unit>quarter</beat-unit><per-minute>72</per-minute>
+            </metronome></direction-type></direction>
+            <note><rest/><duration>1</duration><type>quarter</type></note>
+          </measure></part>
+        </score-partwise>`;
+        const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(
+            TestUtils.getDivElement(document),
+        );
+
+        await osmd.load(xml);
+
+        const expressions: any[] = osmd.Sheet.SourceMeasures[0].TempoExpressions
+            .flatMap((multiTempo: any): any[] => multiTempo.EntriesList.map((entry: any): any => entry.Expression));
+        const mark: any = expressions.find((expression: any): boolean => expression.isMetronomeMark);
+        expect(mark.metronomeText).to.equal(undefined);
+        expect(expressions.some((expression: any): boolean => expression.Label === "Andante")).to.equal(true);
+    });
+
+    it("renders multiple timestamped metronome marks in one measure above colliding chords", async () => {
+        const xml: string = `<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0">
+          <part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list>
+          <part id="P1"><measure number="1">
+            <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+              <clef><sign>G</sign><line>2</line></clef></attributes>
+            <direction placement="above"><direction-type><words>Slower</words></direction-type>
+              <direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>80</per-minute></metronome></direction-type>
+            </direction>
+            <harmony placement="above"><root><root-step>C</root-step></root><kind>major</kind></harmony>
+            <note><pitch><step>C</step><octave>5</octave></pitch><duration>1</duration><type>quarter</type></note>
+            <direction placement="above"><direction-type><metronome>
+              <beat-unit>quarter</beat-unit><per-minute>100</per-minute>
+            </metronome></direction-type></direction>
+            <harmony placement="above"><root><root-step>G</root-step></root><kind>major</kind></harmony>
+            <note><pitch><step>G</step><octave>5</octave></pitch><duration>1</duration><type>quarter</type></note>
+            <note><rest/><duration>2</duration><type>half</type></note>
+          </measure></part>
+        </score-partwise>`;
+        const container: HTMLElement = TestUtils.getDivElement(document);
+        const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(container);
+
+        await osmd.load(xml);
+        osmd.render();
+
+        const measure: any = osmd.GraphicSheet.MeasureList[0][0];
+        const marks: any[] = measure.getVFStave().getModifiers()
+            .filter((modifier: any): boolean => modifier.getCategory?.() === "StaveTempo")
+            .sort((left: any, right: any): number => left.getBoundingBox().getX() - right.getBoundingBox().getX());
+        const chords: any[] = measure.staffEntries
+            .flatMap((staffEntry: any): any[] => staffEntry.graphicalChordContainers)
+            .sort((left: any, right: any): number =>
+                left.PositionAndShape.AbsolutePosition.x - right.PositionAndShape.AbsolutePosition.x,
+            );
+
+        expect(marks).to.have.length(2);
+        expect(marks[1].getBoundingBox().getX()).to.be.greaterThan(marks[0].getBoundingBox().getX());
+        expect(chords).to.have.length(2);
+        for (let index: number = 0; index < marks.length; index++) {
+            const markBottom: number = marks[index].getBoundingBox().getY() + marks[index].getBoundingBox().getH();
+            const chordTop: number = (
+                chords[index].PositionAndShape.AbsolutePosition.y +
+                chords[index].PositionAndShape.BorderMarginTop
+            ) * 10;
+            expect(markBottom).to.be.at.most(chordTop - osmd.EngravingRules.TempoYSpacing * 10 + 0.01);
+        }
+    });
+
     it("exposes sound and metronome tempos as quarter-BPM without inferring words", async () => {
         const xml: string = `<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0">
           <part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list>

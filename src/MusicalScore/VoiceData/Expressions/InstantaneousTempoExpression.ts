@@ -49,6 +49,10 @@ export class InstantaneousTempoExpression extends AbstractTempoExpression {
     public dotted: boolean;
     public beatUnit: string;
     public isMetronomeMark: boolean;
+    /** Words exported in the same MusicXML direction as this metronome mark. */
+    public metronomeText: string;
+    /** Whether MusicXML explicitly requests parentheses around the metronome mark. */
+    public metronomeParentheses: boolean = false;
     /** For complex metronome marks (note equations like swing): left-side note group */
     public metronomeNoteGroupLeft: MetronomeNoteGroup;
     /** For complex metronome marks (note equations like swing): right-side note group */

@@ -48,7 +48,7 @@ import { GraphicalSlur } from "../GraphicalSlur";
 import { BoundingBox } from "../BoundingBox";
 import { ContinuousDynamicExpression } from "../../VoiceData/Expressions/ContinuousExpressions/ContinuousDynamicExpression";
 import { VexFlowContinuousDynamicExpression } from "./VexFlowContinuousDynamicExpression";
-import { InstantaneousTempoExpression, MetronomeNoteGroup, TempoType } from "../../VoiceData/Expressions/InstantaneousTempoExpression";
+import { InstantaneousTempoExpression, MetronomeNoteGroup } from "../../VoiceData/Expressions/InstantaneousTempoExpression";
 import { AlignRestOption } from "../../../OpenSheetMusicDisplay/OSMDOptions";
 import { VexFlowStaffLine } from "./VexFlowStaffLine";
 import { EngravingRules } from "../EngravingRules";
@@ -1174,75 +1174,85 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
     }
   }
 
-  protected createMetronomeMark(metronomeExpression: InstantaneousTempoExpression): void {
-    // note: measureNumber is 0 for pickup measure
-    const measureNumber: number = metronomeExpression.ParentMultiTempoExpression.SourceMeasureParent.MeasureNumber;
-    const staffNumber: number = Math.max(metronomeExpression.StaffNumber - 1, 0);
-    const vfMeasure: VexFlowMeasure =
-      this.graphicalMusicSheet.findGraphicalMeasureByMeasureNumber(measureNumber, staffNumber) as VexFlowMeasure;
-    const firstMetronomeMark: boolean = vfMeasure === this.graphicalMusicSheet.MeasureList[0][0];
-    // const vfMeasure: VexFlowMeasure = (this.graphicalMusicSheet.MeasureList[measureNumber][staffNumber] as VexFlowMeasure);
-    if (vfMeasure.hasMetronomeMark) {
-      return; // don't create more than one metronome mark per measure;
-      // TODO some measures still seem to have two metronome marks, one less bold than the other (or not bold),
-      //   might be because of both <sound> node and <per-minute> node (within <metronome>) creating metronome marks
+  protected createMetronomeMark(metronomeExpression: InstantaneousTempoExpression,
+                                staffLine: StaffLine, relative: PointF2D): void {
+    const vfMeasure: VexFlowMeasure = staffLine.Measures.find(
+      (measure: GraphicalMeasure): boolean => measure.parentSourceMeasure === metronomeExpression.parentMeasure,
+    ) as VexFlowMeasure;
+    if (!vfMeasure) {
+      return;
     }
     const vfStave: VF.Stave = vfMeasure.getVFStave();
-
-    let yShift: number = this.rules.MetronomeMarkYShift;
-    let hasExpressionsAboveStaffline: boolean = false;
-    for (const expression of metronomeExpression.parentMeasure.TempoExpressions) {
-      const isMetronomeExpression: boolean = expression.InstantaneousTempo?.TempoType === TempoType.metronomeMark;
-      if (expression.getPlacementOfFirstEntry() === PlacementEnum.Above &&
-          !isMetronomeExpression) {
-        hasExpressionsAboveStaffline = true;
-        break;
-      }
-    }
-    if (hasExpressionsAboveStaffline) {
-      yShift -= 1.4;
-      // TODO improve this with proper skyline / collision detection. unfortunately we don't have a skyline here yet.
-      // let maxSkylineBeginning: number = 0;
-      // for (let i = 0; i < skyline.length / 1; i++) { // search in first 3rd, disregard end of measure
-      //   maxSkylineBeginning = Math.max(skyline[i], maxSkylineBeginning);
-      // }
-      // console.log('max skyline: ' + maxSkylineBeginning);
-    }
-    const skyline: number[] = this.graphicalMusicSheet.MeasureList[0][0].ParentStaffLine?.SkyLine;
-
     if (metronomeExpression.metronomeNoteGroupLeft && metronomeExpression.metronomeNoteGroupRight) {
       // Complex metronome mark (note equation, e.g. swing notation)
       const noteEquation: any = this.buildNoteEquationForVexFlow(
         metronomeExpression.metronomeNoteGroupLeft,
         metronomeExpression.metronomeNoteGroupRight
       );
-      (vfStave as any).setTempo({ noteEquation }, yShift * unitInPixels);
-    } else {
-      // Simple metronome mark: note = BPM
-      let vexflowDuration: string = "q";
-      if (metronomeExpression.beatUnit) {
-        const duration: Fraction = NoteTypeHandler.getNoteDurationFromType(metronomeExpression.beatUnit);
-        vexflowDuration = VexFlowConverter.durations(duration, false)[0];
-      }
-      vfStave.setTempo(
-        {
-            bpm: metronomeExpression.TempoInBpm,
-            dots: metronomeExpression.dotted ? 1 : 0,
-            duration: vexflowDuration
-        },
-        yShift * unitInPixels);
+      (vfStave as any).setTempo({ noteEquation }, this.rules.MetronomeMarkYShift * unitInPixels);
+      return;
     }
 
-    const xShift: number = firstMetronomeMark ? this.rules.MetronomeMarkXShift * unitInPixels : 0;
-    const lastModifier: any = vfStave.getModifiers()[vfStave.getModifiers().length - 1];
-    lastModifier?.setXShift?.(xShift);
-    lastModifier?.setShiftX?.(xShift);
-    vfMeasure.hasMetronomeMark = true;
-    if (skyline) {
-      // TODO calculate bounding box of metronome mark instead of hacking skyline to fix lyricist collision
-      skyline[0] = Math.min(skyline[0], -4.5 + yShift);
+    let vexflowDuration: string = "q";
+    if (metronomeExpression.beatUnit) {
+      const duration: Fraction = NoteTypeHandler.getNoteDurationFromType(metronomeExpression.beatUnit);
+      vexflowDuration = VexFlowConverter.durations(duration, false)[0];
     }
-    // somehow this is called repeatedly in Clementi, so skyline[0] = Math.min instead of -=
+    const tempo: VF.StaveTempo = new VF.StaveTempo(
+      {
+        name: metronomeExpression.metronomeText,
+        parenthesis: metronomeExpression.metronomeParentheses,
+        bpm: metronomeExpression.TempoInBpm,
+        dots: metronomeExpression.dotted ? 1 : 0,
+        duration: vexflowDuration,
+      },
+      vfStave.getX(),
+      this.rules.MetronomeMarkYShift * unitInPixels,
+    );
+    vfStave.addModifier(tempo);
+    tempo.setXRelativeToStave(0);
+
+    let bounds: VF.BoundingBox = tempo.getBoundingBox();
+    const width: number = bounds.getW() / unitInPixels;
+    const staffWidth: number = staffLine.PositionAndShape.Size.width;
+    const minimumLeft: number = staffLine.PositionAndShape.BorderMarginLeft;
+    const maximumRight: number = staffWidth - this.rules.MeasureRightMargin;
+    let left: number = relative.x;
+    if (left + width > maximumRight) {
+      left = maximumRight - width;
+    }
+    left = Math.max(minimumLeft, left);
+    const measureLeft: number = vfMeasure.PositionAndShape.RelativePosition.x;
+    const targetLeftInPixels: number = vfStave.getX() + (left - measureLeft) * unitInPixels;
+    tempo.setXShift(tempo.getXShift() + targetLeftInPixels - bounds.getX());
+
+    bounds = tempo.getBoundingBox();
+    const right: number = Math.min(staffWidth, left + bounds.getW() / unitInPixels);
+    const skyBottomLineCalculator: SkyBottomLineCalculator = staffLine.SkyBottomLineCalculator;
+    const placement: PlacementEnum = metronomeExpression.Placement === PlacementEnum.Below
+      ? PlacementEnum.Below
+      : PlacementEnum.Above;
+    if (placement === PlacementEnum.Below) {
+      const bottomLine: number = skyBottomLineCalculator.getBottomLineMaxInRange(left, right);
+      const boundsTop: number = (bounds.getY() - vfStave.getY()) / unitInPixels;
+      const requiredTop: number = bottomLine + this.rules.TempoYSpacing;
+      if (Number.isFinite(bottomLine) && boundsTop < requiredTop) {
+        tempo.setYShift(tempo.getYShift() + (requiredTop - boundsTop) * unitInPixels);
+        bounds = tempo.getBoundingBox();
+      }
+      const boundsBottom: number = (bounds.getY() + bounds.getH() - vfStave.getY()) / unitInPixels;
+      skyBottomLineCalculator.updateBottomLineInRange(left, right, boundsBottom);
+    } else {
+      const skyLine: number = skyBottomLineCalculator.getSkyLineMinInRange(left, right);
+      const boundsBottom: number = (bounds.getY() + bounds.getH() - vfStave.getY()) / unitInPixels;
+      const requiredBottom: number = skyLine - this.rules.TempoYSpacing;
+      if (Number.isFinite(skyLine) && boundsBottom > requiredBottom) {
+        tempo.setYShift(tempo.getYShift() + (requiredBottom - boundsBottom) * unitInPixels);
+        bounds = tempo.getBoundingBox();
+      }
+      const boundsTop: number = (bounds.getY() - vfStave.getY()) / unitInPixels;
+      skyBottomLineCalculator.updateSkyLineInRange(left, right, boundsTop);
+    }
   }
 
   /** Convert MetronomeNoteGroup data into the format expected by VexFlow's StaveTempo.drawNoteEquation(). */
