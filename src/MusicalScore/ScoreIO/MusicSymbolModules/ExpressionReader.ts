@@ -157,7 +157,8 @@ export class ExpressionReader {
         }
     }
     public read(directionNode: IXmlElement, currentMeasure: SourceMeasure,
-                inSourceMeasureCurrentFraction: Fraction, inSourceMeasurePreviousFraction: Fraction = undefined): void {
+                inSourceMeasureCurrentFraction: Fraction, inSourceMeasurePreviousFraction: Fraction = undefined,
+                sourceOrder: number = -1): void {
         let isTempoInstruction: boolean = false;
         let isDynamicInstruction: boolean = false;
         let explicitPlaybackTempoAdded: boolean = false;
@@ -167,6 +168,17 @@ export class ExpressionReader {
         if (offsetNode?.value) {
           const offsetValue: number = Number.parseInt(offsetNode.value, 10);
           timestampFraction.Add(new Fraction(offsetValue, 4 * this.divisions));
+        }
+        const directionText: string = directionNode.elements("direction-type")
+            .flatMap(directionType => directionType.elements("words"))
+            .map(words => words.value)
+            .join(" ");
+        if (MultiTempoExpression.isGradualTempoText(directionText)) {
+            currentMeasure.TempoTextAnchors.push({
+                sourceOrder,
+                text: directionText,
+                timestamp: Fraction.createFromFraction(timestampFraction),
+            });
         }
         // this.directionTimestamp = timestampFraction.clone();
         //   this could be correct, but leads to odd differences with Musescore for elements like dim. and wedges.
@@ -306,7 +318,8 @@ export class ExpressionReader {
      * Dorico uses this form for the invisible intermediate steps of gradual tempo changes.
      */
     public readStandaloneSoundTempo(soundNode: IXmlElement, currentMeasure: SourceMeasure,
-                                    inSourceMeasureCurrentFraction: Fraction, divisions: number): void {
+                                    inSourceMeasureCurrentFraction: Fraction, divisions: number,
+                                    sourceOrder: number): void {
         const tempoAttribute: IXmlAttribute = soundNode.attribute("tempo");
         if (!tempoAttribute) {
             return;
@@ -332,6 +345,12 @@ export class ExpressionReader {
         }
         this.musicSheet.HasBPMInfo = true;
         this.createNewTempoExpressionIfNeeded(currentMeasure);
+        this.currentMultiTempoExpression.StandaloneSoundTempo = {
+            cursorTimestamp: Fraction.createFromFraction(inSourceMeasureCurrentFraction),
+            divisions,
+            offsetDivisions: Number.isFinite(offsetDivisions) ? offsetDivisions : 0,
+            sourceOrder,
+        };
         const instantaneousTempoExpression: InstantaneousTempoExpression = new InstantaneousTempoExpression(
             undefined, PlacementEnum.Above, this.staffNumber, tempo, this.currentMultiTempoExpression);
         instantaneousTempoExpression.parentMeasure = currentMeasure;

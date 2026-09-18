@@ -100,6 +100,8 @@ export class SourceMeasure {
     public multipleRestMeasureNumber: number = 0;
     private staffLinkedExpressions: MultiExpression[][] = [];
     private tempoExpressions: MultiTempoExpression[] = [];
+    /** Non-semantic engraving-text positions available to anchor exported numeric tempo curves. */
+    public TempoTextAnchors: TempoTextAnchor[] = [];
     public rehearsalExpression: RehearsalExpression;
     private verticalSourceStaffEntryContainers: VerticalSourceStaffEntryContainer[] = [];
     private implicitMeasure: boolean;
@@ -694,4 +696,10 @@ export class SourceMeasure {
         // // TODO further checks?
         // return true;
     }
+}
+
+export interface TempoTextAnchor {
+    sourceOrder: number;
+    text: string;
+    timestamp: Fraction;
 }

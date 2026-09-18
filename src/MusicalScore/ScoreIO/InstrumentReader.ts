@@ -505,7 +505,7 @@ export class InstrumentReader {
              expressionReader.readExpressionParameters(
                xmlNode, this.instrument, this.divisions, currentFraction, previousFraction, this.currentMeasure.MeasureNumber, false
              );
-             expressionReader.read(xmlNode, this.currentMeasure, currentFraction, previousFraction.clone());
+             expressionReader.read(xmlNode, this.currentMeasure, currentFraction, previousFraction.clone(), xmlNodeIndex);
            }
           }
         } else if (xmlNode.name === "barline") {
@@ -530,7 +530,7 @@ export class InstrumentReader {
         } else if (xmlNode.name === "sound") {
           const expressionReader: ExpressionReader = this.expressionReaders[0];
           expressionReader?.readStandaloneSoundTempo(
-            xmlNode, this.currentMeasure, currentFraction, this.divisions
+            xmlNode, this.currentMeasure, currentFraction, this.divisions, xmlNodeIndex
           );
         } else if (xmlNode.name === "harmony") {
           const noteStaff: number = this.getNoteStaff(xmlNode);

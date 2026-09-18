@@ -8,6 +8,25 @@ import {ContinuousTempoExpression} from "./ContinuousExpressions/ContinuousTempo
 
 export class MultiTempoExpression {
 
+    /** Identify engraving text that may anchor an adjacent numeric tempo curve.
+     * This classification must never create or calculate a playback tempo.
+     */
+    public static isGradualTempoText(input: string): boolean {
+        const text: string = input?.toLowerCase().replace(/\s+/g, " ").trim();
+        if (!text) {
+            return false;
+        }
+        const terms: string[] = [
+            "accelerando", "accel", "piu mosso", "poco piu", "stretto",
+            "poco meno", "meno mosso", "piu lento", "calando", "allargando", "allarg",
+            "rallentando", "rall", "ritardando", "ritard", "ritenuto", "riten", "rit",
+        ];
+        return terms.some(term => {
+            const pattern: string = term.replace(/\s+/g, "\\s+");
+            return new RegExp(`(?:^|\\s)${pattern}(?:\\.|\\s|$)`).test(text);
+        });
+    }
+
     constructor(sourceMeasure: SourceMeasure, timestamp: Fraction) {
         this.sourceMeasure = sourceMeasure;
         this.timestamp = timestamp;
@@ -19,9 +38,13 @@ export class MultiTempoExpression {
     private continuousTempo: ContinuousTempoExpression;
     private expressions: TempoExpressionEntry[] = [];
     private combinedExpressionsText: string;
+    private standaloneSoundTempo: StandaloneSoundTempo;
 
     public get Timestamp(): Fraction {
         return this.timestamp;
+    }
+    public set Timestamp(value: Fraction) {
+        this.timestamp = value;
     }
     public get AbsoluteTimestamp(): Fraction {
         return Fraction.plus(this.sourceMeasure.AbsoluteTimestamp, this.timestamp);
@@ -46,6 +69,12 @@ export class MultiTempoExpression {
     }
     public set CombinedExpressionsText(value: string) {
         this.combinedExpressionsText = value;
+    }
+    public get StandaloneSoundTempo(): StandaloneSoundTempo {
+        return this.standaloneSoundTempo;
+    }
+    public set StandaloneSoundTempo(value: StandaloneSoundTempo) {
+        this.standaloneSoundTempo = value;
     }
     public getPlacementOfFirstEntry(): PlacementEnum {
         let placement: PlacementEnum = PlacementEnum.Above;
@@ -124,6 +153,16 @@ export class MultiTempoExpression {
     public clearContinuousTempo(): void {
         this.continuousTempo = undefined;
     }
+}
+
+/** Source metadata needed to distinguish ordinary MusicXML offsets from
+ * Dorico's unfolded-playback offsets for hidden gradual-tempo steps.
+ */
+export interface StandaloneSoundTempo {
+    cursorTimestamp: Fraction;
+    divisions: number;
+    offsetDivisions: number;
+    sourceOrder: number;
 }
 
 export class TempoExpressionEntry {

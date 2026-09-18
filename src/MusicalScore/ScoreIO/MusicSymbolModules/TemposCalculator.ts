@@ -5,8 +5,13 @@ import { MusicSheet } from "../../MusicSheet";
 import { PlacementEnum } from "../../VoiceData/Expressions/AbstractExpression";
 import { ContinuousTempoExpression } from "../../VoiceData/Expressions/ContinuousExpressions/ContinuousTempoExpression";
 import { ChangeSubType, InstantaneousTempoExpression, InstTempo, TempoType } from "../../VoiceData/Expressions/InstantaneousTempoExpression";
-import { MultiTempoExpression } from "../../VoiceData/Expressions/MultiTempoExpression";
-import { SourceMeasure } from "../../VoiceData/SourceMeasure";
+import { MultiTempoExpression, StandaloneSoundTempo } from "../../VoiceData/Expressions/MultiTempoExpression";
+import { SourceMeasure, TempoTextAnchor } from "../../VoiceData/SourceMeasure";
+
+type TempoRelocation = {
+    absoluteTimestamp: Fraction;
+    expression: MultiTempoExpression;
+};
 
 /** Process the TempoExpressions of a MusicSheet
  *
@@ -28,6 +33,7 @@ export class TemposCalculator implements IAfterSheetReadingModule {
      * - [3] ContinuousTempo values are calculated
      */
     private static processTempoExpressions(musicSheet: MusicSheet | null): void {
+        TemposCalculator.normalizeDoricoStandaloneTempoOffsets(musicSheet);
         const AllExp: MultiTempoExpression[] = [];
         for (
             let sourceMeasureIndex: number = 0, sourceMeasures: SourceMeasure[] = musicSheet.SourceMeasures;
@@ -192,6 +198,129 @@ export class TemposCalculator implements IAfterSheetReadingModule {
         if (ExpressionsList[0]?.InstantaneousTempo) {
             musicSheet.DefaultStartTempoInBpm = ExpressionsList[0].InstantaneousTempo.TempoInBpm;
         }
+    }
+
+    /**
+     * Dorico writes the hidden numeric steps behind some gradual tempo marks as
+     * measure-level sound elements, but gives them offsets on the unfolded
+     * playback clock. MusicXML offsets are otherwise measure-relative. Repair
+     * only the recognisable Dorico cluster: consecutive divisions, monotonic
+     * tempi, an out-of-measure first timestamp, and a gradual marking in this
+     * or the immediately preceding measure.
+     */
+    private static normalizeDoricoStandaloneTempoOffsets(musicSheet: MusicSheet): void {
+        const relocations: TempoRelocation[] = [];
+        for (let measureIndex: number = 0; measureIndex < musicSheet.SourceMeasures.length; measureIndex++) {
+            const measure: SourceMeasure = musicSheet.SourceMeasures[measureIndex];
+            let group: MultiTempoExpression[] = [];
+            const flushGroup: () => void = () => {
+                if (group.length < 2 || !TemposCalculator.isDoricoStandaloneTempoCluster(group, measure)) {
+                    group = [];
+                    return;
+                }
+                const anchor: Fraction = TemposCalculator.findGradualTempoAnchor(
+                    musicSheet.SourceMeasures, measureIndex, group,
+                );
+                if (!anchor) {
+                    group = [];
+                    return;
+                }
+                const firstOffset: number = group[0].StandaloneSoundTempo.offsetDivisions;
+                const divisions: number = group[0].StandaloneSoundTempo.divisions;
+                for (const expression of group) {
+                    const relativeOffset: number = expression.StandaloneSoundTempo.offsetDivisions - firstOffset + 1;
+                    relocations.push({
+                        expression,
+                        absoluteTimestamp: Fraction.plus(
+                            anchor,
+                            new Fraction(relativeOffset, divisions * 4),
+                        ),
+                    });
+                }
+                group = [];
+            };
+
+            for (const expression of measure.TempoExpressions) {
+                const metadata: StandaloneSoundTempo = expression.StandaloneSoundTempo;
+                if (!metadata) {
+                    flushGroup();
+                    continue;
+                }
+                const previous: StandaloneSoundTempo = group[group.length - 1]?.StandaloneSoundTempo;
+                if (previous &&
+                    (previous.sourceOrder + 1 !== metadata.sourceOrder ||
+                     previous.divisions !== metadata.divisions ||
+                     previous.offsetDivisions + 1 !== metadata.offsetDivisions)) {
+                    flushGroup();
+                }
+                group.push(expression);
+            }
+            flushGroup();
+        }
+
+        for (const relocation of relocations) {
+            TemposCalculator.relocateTempoExpression(musicSheet, relocation);
+        }
+    }
+
+    private static isDoricoStandaloneTempoCluster(group: MultiTempoExpression[], measure: SourceMeasure): boolean {
+        const firstMetadata: StandaloneSoundTempo = group[0].StandaloneSoundTempo;
+        if (!firstMetadata || firstMetadata.divisions <= 0 || !group[0].Timestamp.gt(measure.Duration)) {
+            return false;
+        }
+        const tempi: number[] = group.map(expression =>
+            expression.InstantaneousTempo?.ExplicitPlaybackTempoInQuarterBpm,
+        );
+        if (tempi.some(tempo => !Number.isFinite(tempo))) {
+            return false;
+        }
+        const nonDecreasing: boolean = tempi.every((tempo, index) => index === 0 || tempo >= tempi[index - 1]);
+        const nonIncreasing: boolean = tempi.every((tempo, index) => index === 0 || tempo <= tempi[index - 1]);
+        const changes: boolean = tempi.some((tempo, index) => index > 0 && tempo !== tempi[index - 1]);
+        return changes && (nonDecreasing || nonIncreasing);
+    }
+
+    private static findGradualTempoAnchor(sourceMeasures: SourceMeasure[], measureIndex: number,
+                                          group: MultiTempoExpression[]): Fraction {
+        const currentMeasure: SourceMeasure = sourceMeasures[measureIndex];
+        const firstSourceOrder: number = group[0].StandaloneSoundTempo.sourceOrder;
+        const sameMeasureAnchors: TempoTextAnchor[] = currentMeasure.TempoTextAnchors;
+        if (sameMeasureAnchors.length > 0) {
+            const nearest: TempoTextAnchor = sameMeasureAnchors.reduce((previous, candidate) =>
+                Math.abs(candidate.sourceOrder - firstSourceOrder) < Math.abs(previous.sourceOrder - firstSourceOrder)
+                    ? candidate : previous,
+            );
+            return Fraction.plus(currentMeasure.AbsoluteTimestamp, nearest.timestamp);
+        }
+        if (measureIndex === 0) {
+            return undefined;
+        }
+        const previousMeasure: SourceMeasure = sourceMeasures[measureIndex - 1];
+        const previousAnchor: TempoTextAnchor = previousMeasure.TempoTextAnchors[previousMeasure.TempoTextAnchors.length - 1];
+        return previousAnchor
+            ? Fraction.plus(previousMeasure.AbsoluteTimestamp, previousAnchor.timestamp)
+            : undefined;
+    }
+
+    private static relocateTempoExpression(musicSheet: MusicSheet, relocation: TempoRelocation): void {
+        const expression: MultiTempoExpression = relocation.expression;
+        const originalMeasure: SourceMeasure = expression.SourceMeasureParent;
+        const originalIndex: number = originalMeasure.TempoExpressions.indexOf(expression);
+        if (originalIndex >= 0) {
+            originalMeasure.TempoExpressions.splice(originalIndex, 1);
+        }
+
+        let targetMeasure: SourceMeasure = musicSheet.SourceMeasures[musicSheet.SourceMeasures.length - 1];
+        for (let index: number = 0; index < musicSheet.SourceMeasures.length - 1; index++) {
+            const nextMeasure: SourceMeasure = musicSheet.SourceMeasures[index + 1];
+            if (relocation.absoluteTimestamp.lt(nextMeasure.AbsoluteTimestamp)) {
+                targetMeasure = musicSheet.SourceMeasures[index];
+                break;
+            }
+        }
+        expression.SourceMeasureParent = targetMeasure;
+        expression.Timestamp = Fraction.minus(relocation.absoluteTimestamp, targetMeasure.AbsoluteTimestamp);
+        targetMeasure.TempoExpressions.push(expression);
     }
     /** Clean the start of the  expressions list and return the TempoPrimo BPM.
      *
