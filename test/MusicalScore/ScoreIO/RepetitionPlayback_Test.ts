@@ -1,9 +1,11 @@
 import { expect } from "chai";
 import { IXmlElement } from "../../../src/Common/FileIO/Xml";
 import { MusicPartManagerIterator } from "../../../src/MusicalScore/MusicParts/MusicPartManagerIterator";
+import { Repetition } from "../../../src/MusicalScore/MusicSource/Repetition";
 import { MusicSheet } from "../../../src/MusicalScore/MusicSheet";
 import { MusicSheetReader } from "../../../src/MusicalScore/ScoreIO/MusicSheetReader";
 import {
+    AlignmentType,
     RepetitionInstruction,
     RepetitionInstructionEnum,
 } from "../../../src/MusicalScore/VoiceData/Instructions/RepetitionInstruction";
@@ -26,6 +28,28 @@ function collectMeasureTraversal(sheet: MusicSheet): number[] {
 
         if (hasAudibleNotes) {
             traversal.push(iterator.CurrentMeasureIndex + 1);
+        }
+        iterator.moveToNext();
+    }
+
+    return traversal;
+}
+
+function collectMeasureTraversalWithIterations(
+    sheet: MusicSheet,
+): Array<{ iteration: number, measureIndex: number }> {
+    const traversal: Array<{ iteration: number, measureIndex: number }> = [];
+    const iterator: MusicPartManagerIterator = sheet.MusicPartManager.getIterator();
+
+    while (!iterator.EndReached && iterator.CurrentVoiceEntries) {
+        const hasAudibleNotes: boolean = iterator.CurrentAudibleVoiceEntries().some((voiceEntry): boolean =>
+            (voiceEntry?.Notes || []).some((note): boolean => !note.isRest?.()));
+
+        if (hasAudibleNotes) {
+            traversal.push({
+                iteration: iterator.CurrentRepetitionIteration,
+                measureIndex: iterator.CurrentMeasureIndex,
+            });
         }
         iterator.moveToNext();
     }
@@ -68,6 +92,37 @@ describe("Music Sheet Repetition playback", () => {
             1, 2,
             1, 2,
             1, 3,
+        ]);
+    });
+
+    it("retains the real pass iteration when a repeat from the beginning has an outro", () => {
+        const sheet: MusicSheet = readSheet("test_repeat_volta_1_2_3_outro.musicxml");
+        const repeatedSection: Repetition = sheet.Repetitions.find((repetition): boolean =>
+            repetition.UserNumberOfRepetitions === 3);
+        const firstInstructions: RepetitionInstruction[] = sheet.SourceMeasures[0].FirstRepetitionInstructions;
+
+        expect(sheet.Repetitions).to.have.length(2);
+        expect(repeatedSection).not.to.equal(undefined);
+        expect(firstInstructions.map((instruction): AlignmentType => instruction.alignment)).to.deep.equal([
+            AlignmentType.Begin,
+            AlignmentType.Begin,
+        ]);
+        expect(firstInstructions.map((instruction): number => instruction.parentRepetition.EndIndex)).to.deep.equal([
+            4,
+            3,
+        ]);
+        expect(firstInstructions[firstInstructions.length - 1].parentRepetition).to.equal(repeatedSection);
+        expect(collectMeasureTraversalWithIterations(sheet)).to.deep.equal([
+            { iteration: 1, measureIndex: 0 },
+            { iteration: 1, measureIndex: 1 },
+            { iteration: 1, measureIndex: 2 },
+            { iteration: 2, measureIndex: 0 },
+            { iteration: 2, measureIndex: 1 },
+            { iteration: 2, measureIndex: 2 },
+            { iteration: 3, measureIndex: 0 },
+            { iteration: 3, measureIndex: 1 },
+            { iteration: 3, measureIndex: 3 },
+            { iteration: 3, measureIndex: 4 },
         ]);
     });
 });

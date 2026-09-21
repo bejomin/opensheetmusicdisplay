@@ -118,7 +118,8 @@ export class RepetitionCalculator {
     if (!overallRepetition) {
         const repetition: Repetition = new Repetition(this.musicSheet, true);
         repetition.FromWords = true;
-        repetition.startMarker = new RepetitionInstruction(startMeasureIndex, RepetitionInstructionEnum.StartLine);
+        repetition.startMarker = new RepetitionInstruction(
+          startMeasureIndex, RepetitionInstructionEnum.StartLine, AlignmentType.Begin);
         repetition.startMarker.parentRepetition = repetition;
         this.musicSheet.SourceMeasures[startMeasureIndex].FirstRepetitionInstructions.push(repetition.startMarker);
         repetition.endMarker = new RepetitionInstruction(endMeasureIndex, RepetitionInstructionEnum.BackJumpLine);
@@ -240,7 +241,9 @@ export class RepetitionCalculator {
                     }
                     if (currentRepetition === undefined) {
                         currentRepetition = this.createNewRepetition(0);
-                        currentRepetition.RepetitonUnderConstruction.startMarker = new RepetitionInstruction(0, RepetitionInstructionEnum.None);
+                        currentRepetition.RepetitonUnderConstruction.startMarker = new RepetitionInstruction(
+                          0, RepetitionInstructionEnum.None, AlignmentType.Begin,
+                          currentRepetition.RepetitonUnderConstruction);
                     }
                 }
                 if (currentRepetition.RepetitonUnderConstruction.forwardJumpInstruction === undefined) {

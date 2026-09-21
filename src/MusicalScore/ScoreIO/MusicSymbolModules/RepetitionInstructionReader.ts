@@ -97,7 +97,8 @@ export class RepetitionInstructionReader {
           }
           if (direction === "forward") {
             // start new Repetition
-            const newInstruction: RepetitionInstruction = new RepetitionInstruction(this.currentMeasureIndex, RepetitionInstructionEnum.StartLine);
+            const newInstruction: RepetitionInstruction = new RepetitionInstruction(
+              this.currentMeasureIndex, RepetitionInstructionEnum.StartLine, AlignmentType.Begin);
             this.addInstruction(this.repetitionInstructions, newInstruction);
           }
         } else { // location right

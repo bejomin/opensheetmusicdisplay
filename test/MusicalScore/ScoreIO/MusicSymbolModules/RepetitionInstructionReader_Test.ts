@@ -3,7 +3,11 @@ import { IXmlElement } from "../../../../src/Common/FileIO/Xml";
 import { MusicSheet } from "../../../../src/MusicalScore/MusicSheet";
 import { MusicSheetReader } from "../../../../src/MusicalScore/ScoreIO/MusicSheetReader";
 import { RepetitionInstructionReader } from "../../../../src/MusicalScore/ScoreIO/MusicSymbolModules/RepetitionInstructionReader";
-import { RepetitionInstruction, RepetitionInstructionEnum } from "../../../../src/MusicalScore/VoiceData/Instructions/RepetitionInstruction";
+import {
+    AlignmentType,
+    RepetitionInstruction,
+    RepetitionInstructionEnum,
+} from "../../../../src/MusicalScore/VoiceData/Instructions/RepetitionInstruction";
 import { SourceMeasure } from "../../../../src/MusicalScore/VoiceData/SourceMeasure";
 import { MultiExpression } from "../../../../src/MusicalScore/VoiceData/Expressions/MultiExpression";
 import { UnknownExpression } from "../../../../src/MusicalScore/VoiceData/Expressions/UnknownExpression";
@@ -41,6 +45,18 @@ describe("RepetitionInstructionReader", () => {
                 1, 2, 4, 5,
             ]);
             expect(findInstruction(instructions, RepetitionInstructionEnum.BackJumpLine)?.Times).to.equal(4);
+        });
+
+        it("aligns forward repeat instructions at the beginning of their measure", () => {
+            const instructions: RepetitionInstruction[] = handleBarline(
+                `<barline location="left">
+                    <repeat direction="forward"/>
+                </barline>`,
+            );
+
+            expect(findInstruction(instructions, RepetitionInstructionEnum.StartLine)?.alignment).to.equal(
+                AlignmentType.Begin,
+            );
         });
 
         it("parses multi-digit ending ranges", () => {
