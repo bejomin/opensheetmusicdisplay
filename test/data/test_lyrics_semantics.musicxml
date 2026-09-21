@@ -55,6 +55,14 @@
           <text>explicit</text>
           <extend type="start"/>
         </lyric>
+        <lyric number="6">
+          <syllabic>single</syllabic>
+          <text>Preserved</text>
+          <extend type="start"/>
+        </lyric>
+        <lyric number="6">
+          <extend type="stop"/>
+        </lyric>
       </note>
       <note>
         <pitch>

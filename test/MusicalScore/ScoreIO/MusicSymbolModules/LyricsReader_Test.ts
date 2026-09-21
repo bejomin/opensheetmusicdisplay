@@ -63,6 +63,13 @@ describe("LyricsReader semantics", () => {
         expect(typedStop.extend).to.be.false;
     });
 
+    it("preserves a text lyric when an extender-only node repeats its verse on the same note", (): void => {
+        const lyric: LyricsEntry = lyricAt(0, "6");
+
+        expect(lyric.Text).to.equal("Preserved");
+        expect(lyric.ExtendType).to.equal(LyricExtendType.Start);
+    });
+
     it("infers a melisma only across intervening pitched entries in the same word", (): void => {
         const inferredBegin: LyricsEntry = lyricAt(0, "1");
         const inferredMiddle: LyricsEntry = lyricAt(2, "1");

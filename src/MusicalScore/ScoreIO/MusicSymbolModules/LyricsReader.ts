@@ -196,7 +196,7 @@ export class LyricsReader {
 
     private attachLyricEntry(lyricsEntry: LyricsEntry, verseNumber: string, currentVoiceEntry: VoiceEntry): void {
         // Only add the lyric entry if another entry has not already been given.
-        if (!currentVoiceEntry.LyricsEntries[verseNumber]) {
+        if (!currentVoiceEntry.LyricsEntries.containsKey(verseNumber)) {
             currentVoiceEntry.LyricsEntries.setValue(verseNumber, lyricsEntry);
             if (currentVoiceEntry.ParentSourceStaffEntry?.VerticalContainerParent?.ParentMeasure) {
                 currentVoiceEntry.ParentSourceStaffEntry.VerticalContainerParent.ParentMeasure.hasLyrics = true;
