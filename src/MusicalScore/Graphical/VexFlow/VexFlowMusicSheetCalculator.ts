@@ -1228,12 +1228,20 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
 
     bounds = tempo.getBoundingBox();
     const right: number = Math.min(staffWidth, left + bounds.getW() / unitInPixels);
+    const collisionWidth: number = Math.max(0, staffWidth);
+    const collisionLeft: number = Math.min(Math.max(0, left), collisionWidth);
+    const collisionRight: number = Math.min(Math.max(collisionLeft, right), collisionWidth);
+    if (collisionRight <= collisionLeft) {
+      // Extremely narrow render targets can leave no staff-line range under the mark.
+      // Keep the mark, but do not send a reversed or empty range to the skyline calculator.
+      return;
+    }
     const skyBottomLineCalculator: SkyBottomLineCalculator = staffLine.SkyBottomLineCalculator;
     const placement: PlacementEnum = metronomeExpression.Placement === PlacementEnum.Below
       ? PlacementEnum.Below
       : PlacementEnum.Above;
     if (placement === PlacementEnum.Below) {
-      const bottomLine: number = skyBottomLineCalculator.getBottomLineMaxInRange(left, right);
+      const bottomLine: number = skyBottomLineCalculator.getBottomLineMaxInRange(collisionLeft, collisionRight);
       const boundsTop: number = (bounds.getY() - vfStave.getY()) / unitInPixels;
       const requiredTop: number = bottomLine + this.rules.TempoYSpacing;
       if (Number.isFinite(bottomLine) && boundsTop < requiredTop) {
@@ -1241,9 +1249,9 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
         bounds = tempo.getBoundingBox();
       }
       const boundsBottom: number = (bounds.getY() + bounds.getH() - vfStave.getY()) / unitInPixels;
-      skyBottomLineCalculator.updateBottomLineInRange(left, right, boundsBottom);
+      skyBottomLineCalculator.updateBottomLineInRange(collisionLeft, collisionRight, boundsBottom);
     } else {
-      const skyLine: number = skyBottomLineCalculator.getSkyLineMinInRange(left, right);
+      const skyLine: number = skyBottomLineCalculator.getSkyLineMinInRange(collisionLeft, collisionRight);
       const boundsBottom: number = (bounds.getY() + bounds.getH() - vfStave.getY()) / unitInPixels;
       const requiredBottom: number = skyLine - this.rules.TempoYSpacing;
       if (Number.isFinite(skyLine) && boundsBottom > requiredBottom) {
@@ -1251,7 +1259,7 @@ export class VexFlowMusicSheetCalculator extends MusicSheetCalculator {
         bounds = tempo.getBoundingBox();
       }
       const boundsTop: number = (bounds.getY() - vfStave.getY()) / unitInPixels;
-      skyBottomLineCalculator.updateSkyLineInRange(left, right, boundsTop);
+      skyBottomLineCalculator.updateSkyLineInRange(collisionLeft, collisionRight, boundsTop);
     }
   }
 
