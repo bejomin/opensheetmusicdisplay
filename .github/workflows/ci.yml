@@ -11,10 +11,6 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [24.x, 26.x]
 
     steps:
       - uses: actions/checkout@v6
@@ -22,13 +18,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 26.x
 
       - name: Cache node_modules
         uses: actions/cache@v5
         with:
           path: node_modules
-          key: ${{ runner.os }}-node-${{ matrix.node-version }}-modules-${{ hashFiles('package.json') }}
+          key: ${{ runner.os }}-node-26-modules-${{ hashFiles('package.json') }}
 
       - name: Install dependencies
         env:
@@ -53,5 +49,4 @@ jobs:
         run: npm run test:visual:comparator
 
       - name: Build CH Songbook package target
-        if: matrix.node-version == '26.x'
         run: npm run build:ch-songbook
