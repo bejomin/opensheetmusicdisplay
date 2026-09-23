@@ -44,6 +44,7 @@ import {
     resolveFingeringPlacement,
 } from "../FingeringPlacement";
 import { VexFlowFingeringModifier } from "./VexFlowFingeringModifier";
+import { VexFlowFullWidthVolta } from "./VexFlowFullWidthVolta";
 
 const DOUBLE_HEAVY_BARLINE_TYPE: number = 8;
 
@@ -800,7 +801,9 @@ export class VexFlowMeasure extends GraphicalMeasure {
             vexFlowVoltaHeight *= 10;
             const voltaLabel: string = formatVoltaLabel(repetitionInstruction.endingIndices);
             // VexFlow's runtime Volta modifier accepts string labels, but the vendored type definition still narrows this to number.
-            this.stave.setVoltaType(voltaType, voltaLabel, vexFlowVoltaHeight);
+            this.stave.addModifier(new VexFlowFullWidthVolta(
+                voltaType, voltaLabel, this.stave.getX(), vexFlowVoltaHeight,
+            ));
             const modifiers: FontAssignableModifier[] =
                 ((this.stave as any).modifiers as FontAssignableModifier[]) || [];
             const voltaModifier: FontAssignableModifier | undefined = [...modifiers]

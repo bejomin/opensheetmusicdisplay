@@ -35,6 +35,8 @@ import { TechnicalInstruction, TechnicalInstructionType } from
 import { VexFlowFingeringModifier } from
    "../../../../src/MusicalScore/Graphical/VexFlow/VexFlowFingeringModifier";
 import { FontStyles } from "../../../../src/Common/Enums/FontStyles";
+import { VexFlowFullWidthVolta } from
+   "../../../../src/MusicalScore/Graphical/VexFlow/VexFlowFullWidthVolta";
 
 describe("VexFlow Measure", () => {
 
@@ -133,6 +135,47 @@ describe("VexFlow Measure", () => {
             String(modifier.number ?? modifier.text ?? ""));
 
       expect(labels).to.deep.equal(["1–4."]);
+   });
+
+   it("draws a first-ending line over a leading time-signature change", async (): Promise<void> => {
+      const source: Document = TestUtils.getScore("test_repeat_volta_1_2_3.musicxml");
+      const score: Document = source.cloneNode(true) as Document;
+      const endingMeasure: Element = score.querySelector('measure[number="2"]');
+      const attributes: Element = score.createElement("attributes");
+      attributes.innerHTML = "<time><beats>2</beats><beat-type>4</beat-type></time>";
+      endingMeasure.insertBefore(attributes, endingMeasure.firstElementChild);
+      const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(
+         TestUtils.getDivElement(document),
+      );
+      await osmd.load(score);
+      osmd.render();
+
+      const measure: any = osmd.GraphicSheet.findGraphicalMeasure(1, 0);
+      const stave: VF.Stave = measure.getVFStave();
+      const volta: VexFlowFullWidthVolta = stave.getModifiers().find(
+         (modifier: VF.StaveModifier): boolean => modifier.getCategory() === "Volta",
+      ) as VexFlowFullWidthVolta;
+      expect(volta).to.be.instanceOf(VexFlowFullWidthVolta);
+      expect(stave.getModifierXShift(volta.getPosition())).to.be.greaterThan(0);
+
+      const ctx: VF.RenderContext = stave.checkContext();
+      const originalFillRect: typeof ctx.fillRect = ctx.fillRect;
+      const lines: Array<{ x: number, width: number }> = [];
+      (ctx as any).fillRect = function(x: number, y: number, width: number, height: number): VF.RenderContext {
+         if (height === 1 && width > 20) {
+            lines.push({ x, width });
+         }
+         return originalFillRect.call(this, x, y, width, height);
+      };
+      try {
+         volta.draw();
+      } finally {
+         ctx.fillRect = originalFillRect;
+      }
+      expect(lines).to.have.length(1);
+      expect(lines[0].x).to.be.closeTo(stave.getX(), 0.001);
+      // This one-measure ending retains VexFlow's 3px right-jog inset.
+      expect(lines[0].width).to.be.closeTo(stave.getWidth() - 3, 0.001);
    });
 
    it("aligns adjacent volta lines to the highest required lane", async (): Promise<void> => {

@@ -59,7 +59,6 @@ import { VerticalSourceStaffEntryContainer } from "../VoiceData/VerticalSourceSt
 import { SkyBottomLineCalculator } from "./SkyBottomLineCalculator";
 import { PlacementEnum } from "../VoiceData/Expressions/AbstractExpression";
 import { getDefaultTextFontFamily } from "./ScoreTextFontRouting";
-import { AbstractGraphicalInstruction } from "./AbstractGraphicalInstruction";
 import { GraphicalInstantaneousTempoExpression } from "./GraphicalInstantaneousTempoExpression";
 import { InstantaneousTempoExpression } from "../VoiceData/Expressions/InstantaneousTempoExpression";
 import { ContinuousTempoExpression } from "../VoiceData/Expressions/ContinuousExpressions/ContinuousTempoExpression";
@@ -2250,17 +2249,13 @@ export abstract class MusicSheetCalculator {
                 const instantaniousTempo: InstantaneousTempoExpression = (multiTempoExpression.EntriesList[0].Expression as InstantaneousTempoExpression);
                 instantaniousTempo.Placement = PlacementEnum.Above;
 
-                // if an InstantaniousTempoExpression exists at the very beginning then
-                // check if expression is positioned at first ever StaffEntry and
-                // check if MusicSystem is first MusicSystem
-                if (staffLine.Measures[0].staffEntries.length > 0 &&
-                    Math.abs(relative.x - staffLine.Measures[0].staffEntries[0].PositionAndShape.RelativePosition.x) === 0 &&
+                // A beginning-of-score mark belongs at the content edge after
+                // clef/key/time instructions, not at the last instruction's
+                // own offset (which can shift it into the first measure).
+                if (measureIndex === 0 && multiTempoExpression.Timestamp.RealValue === 0 &&
                     staffLine.ParentMusicSystem === this.musicSystems[0]) {
-                    const firstInstructionEntry: GraphicalStaffEntry = staffLine.Measures[0].FirstInstructionStaffEntry;
-                    if (firstInstructionEntry) {
-                        const lastInstruction: AbstractGraphicalInstruction = firstInstructionEntry.GraphicalInstructions.last();
-                        relative.x = lastInstruction.PositionAndShape.RelativePosition.x;
-                    }
+                    relative.x = staffLine.Measures[0].PositionAndShape.RelativePosition.x +
+                        staffLine.Measures[0].beginInstructionsWidth;
                     if (this.rules.CompactMode) {
                         relative.x = staffLine.PositionAndShape.RelativePosition.x +
                             staffLine.Measures[0].PositionAndShape.RelativePosition.x;

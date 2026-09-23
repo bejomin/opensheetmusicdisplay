@@ -33,6 +33,22 @@ import { GraphicalStaffEntry } from "../GraphicalStaffEntry";
 import { GraphicalMeasure } from "../GraphicalMeasure";
 import { Staff } from "../../VoiceData/Staff";
 
+/** Cue notes occupy their authored rhythmic voice; only their engraving is reduced. */
+class CueStaveNote extends VF.StaveNote {
+    constructor(noteStruct: VF.StaveNoteStruct) {
+        super(noteStruct);
+        const cueScale: number = 2 / 3;
+        this.fontScale = cueScale;
+        this.setFontSize(parseFloat(this.getFontSize()) * cueScale);
+        this.reset();
+        this.getStem()?.setExtension(this.getStemExtension());
+    }
+
+    public override getStemExtension(): number {
+        return super.getStemExtension() + VF.Stem.HEIGHT * (this.getFontScale() - 1);
+    }
+}
+
 /**
  * Helper class, which contains static methods which actually convert
  * from OSMD objects to VexFlow objects.
@@ -481,14 +497,15 @@ export class VexFlowConverter {
 
         const firstNote: Note = gve.notes[0].sourceNote;
         if (firstNote.IsCueNote) {
-            vfnoteStruct.glyphFontScale = VexFlow.NOTATION_FONT_SCALE * 0.66;
             vfnoteStruct.strokePx = VF.GraceNote.LEDGER_LINE_OFFSET;
         }
 
-        if (gve.parentVoiceEntry.IsGrace || gve.notes[0].sourceNote.IsCueNote) {
+        if (gve.parentVoiceEntry.IsGrace) {
             vfnote = new VF.GraceNote(vfnoteStruct);
         } else {
-            vfnote = new VF.StaveNote(vfnoteStruct);
+            vfnote = firstNote.IsCueNote
+                ? new CueStaveNote(vfnoteStruct)
+                : new VF.StaveNote(vfnoteStruct);
             (vfnote as any).stagger_same_whole_notes = rules.StaggerSameWholeNotes;
             //   it would be nice to only save this once, not for every note, but has to be accessible in stavenote.js
         }

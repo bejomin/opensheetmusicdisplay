@@ -14,6 +14,35 @@ function explicitTempoMap(osmd: OpenSheetMusicDisplay): Array<{ tempo: number, t
 }
 
 describe("explicit MusicXML playback tempo", () => {
+    it("anchors an initial after-backup metronome mark to the first measure content", async () => {
+        const xml: string = `<?xml version="1.0"?><score-partwise version="4.0">
+          <part-list><score-part id="P1"><part-name>Voice</part-name></score-part></part-list>
+          <part id="P1"><measure number="1">
+            <attributes><divisions>1</divisions><time><beats>2</beats><beat-type>2</beat-type></time>
+              <clef><sign>G</sign><line>2</line></clef></attributes>
+            <note><rest/><duration>4</duration><type>whole</type></note>
+            <backup><duration>4</duration></backup>
+            <direction placement="above"><direction-type><metronome>
+              <beat-unit>half</beat-unit><per-minute>92</per-minute>
+            </metronome></direction-type></direction>
+          </measure></part></score-partwise>`;
+        const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(
+            TestUtils.getDivElement(document),
+        );
+        await osmd.load(xml);
+        osmd.render();
+        const measure: any = osmd.GraphicSheet.MeasureList[0][0];
+        const stave: any = measure.getVFStave();
+        const mark: any = stave.getModifiers().find(
+            (modifier: any): boolean => modifier.getCategory?.() === "StaveTempo",
+        );
+        expect(mark).to.not.equal(undefined);
+        expect(mark.getBoundingBox().getX()).to.be.closeTo(
+            stave.getX() + measure.beginInstructionsWidth * 10,
+            1,
+        );
+    });
+
     it("keeps sibling tempo words with their metronome mark without deriving playback from the words", async () => {
         const xml: string = `<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0">
           <part-list><score-part id="P1"><part-name>Music</part-name></score-part></part-list>
@@ -106,6 +135,14 @@ describe("explicit MusicXML playback tempo", () => {
 
         expect(marks).to.have.length(2);
         expect(marks[1].getBoundingBox().getX()).to.be.greaterThan(marks[0].getBoundingBox().getX());
+        const secondBeat: any = measure.staffEntries.find(
+            (entry: any): boolean => Math.abs(entry.relInMeasureTimestamp.RealValue - 0.25) < 0.000001,
+        );
+        expect(secondBeat).to.not.equal(undefined);
+        expect(marks[1].getBoundingBox().getX()).to.be.closeTo(
+            measure.getVFStave().getX() + secondBeat.PositionAndShape.RelativePosition.x * 10,
+            1,
+        );
         expect(chords).to.have.length(2);
         for (let index: number = 0; index < marks.length; index++) {
             const markBottom: number = marks[index].getBoundingBox().getY() + marks[index].getBoundingBox().getH();
