@@ -15,6 +15,16 @@ export enum SystemLinesEnum {
     Short = 13            /*              [bar-style=short]*/
 }
 
+/** Infer the visual close of a complete score without changing its parsed MusicXML. */
+export function displayEndingBarlineStyle(
+    measure: { endingBarStyleXml: string, endingBarStyleEnum: SystemLinesEnum },
+    isFinalSourceMeasure: boolean,
+): SystemLinesEnum {
+    return isFinalSourceMeasure && !measure.endingBarStyleXml
+        ? SystemLinesEnum.ThinBold
+        : measure.endingBarStyleEnum;
+}
+
 export class SystemLinesEnumHelper {
     public static xmlBarlineStyleToSystemLinesEnum(xmlValue: string): SystemLinesEnum {
         if (xmlValue === "regular") {

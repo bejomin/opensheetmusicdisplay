@@ -6,7 +6,7 @@ import { GraphicalMusicSheet } from "../GraphicalMusicSheet";
 import { GraphicalStaffEntry } from "../GraphicalStaffEntry";
 import { GraphicalVoiceEntry } from "../GraphicalVoiceEntry";
 import { GraphicalChordSymbolContainer } from "../GraphicalChordSymbolContainer";
-import { SystemLinesEnum } from "../SystemLinesEnum";
+import { SystemLinesEnum, displayEndingBarlineStyle } from "../SystemLinesEnum";
 import {
   HorizontalSystemSpacingCandidate,
   HorizontalSystemSpacingLayout,
@@ -1117,8 +1117,12 @@ function collectMeasureProfiles(
       : 0;
     const minimumRequiredWidthPx: number = notationMinimumRequiredWidthPx;
     const terminalHasVisibleRest: boolean = lastColumn?.hasVisibleRest === true;
+    const sourceMeasures: SourceMeasure[] = graphicalMusicSheet.ParentMusicSheet.SourceMeasures;
     const terminalBarlineInwardExtentPx: number = terminalHasVisibleRest
-      ? endBarlineInwardExtentPx(sourceMeasure.endingBarStyleEnum)
+      ? endBarlineInwardExtentPx(displayEndingBarlineStyle(
+        sourceMeasure,
+        sourceMeasure === sourceMeasures[sourceMeasures.length - 1],
+      ))
       : 0;
     const terminalRestOpticalTailPx: number = terminalHasVisibleRest &&
       !isShortImplicitMeasure(sourceMeasure)

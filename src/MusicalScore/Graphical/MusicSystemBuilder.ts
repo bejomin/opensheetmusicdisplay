@@ -14,7 +14,7 @@ import {StaffLine} from "./StaffLine";
 import {GraphicalLine} from "./GraphicalLine";
 import {SourceStaffEntry} from "../VoiceData/SourceStaffEntry";
 import {AbstractNotationInstruction} from "../VoiceData/Instructions/AbstractNotationInstruction";
-import {SystemLinesEnum} from "./SystemLinesEnum";
+import {SystemLinesEnum, displayEndingBarlineStyle} from "./SystemLinesEnum";
 import {GraphicalMusicSheet} from "./GraphicalMusicSheet";
 import {MusicSheetCalculator} from "./MusicSheetCalculator";
 import {MidiInstrument} from "../VoiceData/Instructions/ClefInstruction";
@@ -907,12 +907,6 @@ export class MusicSystemBuilder {
         if (this.thisMeasureEndsLineRepetition()) {
             return SystemLinesEnum.DotsThinBold;
         }
-        // always end piece with final barline: not a good idea. user should be able to override final barline.
-        // also, selecting range of measures to draw would always end with final barline, even if extract is from the middle of the piece
-        // this was probably done before we parsed the barline type from XML.
-        /*if (this.measureListIndex === this.measureList.length - 1 || this.measureList[this.measureListIndex][0].parentSourceMeasure.endsPiece) {
-            return SystemLinesEnum.ThinBold;
-        }*/
         if (this.nextMeasureHasKeyInstructionChange()) {
         //if (this.nextMeasureHasKeyInstructionChange() || this.thisMeasureEndsWordRepetition() || this.nextMeasureBeginsWordRepetition()) {
         //  previously, we forced a double thin barline for places like "to coda" end of measure, even if it there's no double thin barline in the xml
@@ -921,11 +915,11 @@ export class MusicSystemBuilder {
         if (!sourceMeasure) {
             return SystemLinesEnum.SingleThin;
         }
-        if (sourceMeasure.endingBarStyleEnum !== undefined) {
-            return sourceMeasure.endingBarStyleEnum;
-        }
-        // TODO: print an error message if the default fallback is used.
-        return SystemLinesEnum.SingleThin;
+        const sourceMeasures: SourceMeasure[] = this.graphicalMusicSheet.ParentMusicSheet.SourceMeasures;
+        return displayEndingBarlineStyle(
+            sourceMeasure,
+            sourceMeasure === sourceMeasures[sourceMeasures.length - 1],
+        );
     }
 
     /**
