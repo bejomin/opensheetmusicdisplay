@@ -1242,6 +1242,12 @@ function attachUnanchoredHarmonyColumns(
   if (!Number.isFinite(measureEnd) || measureEnd <= 0) {
     return;
   }
+  const rhythmicAnchors: HorizontalSpacingAnchor[] = columns
+    .filter((column: ProfileColumn): boolean => column.contexts.length > 0)
+    .map((column: ProfileColumn): HorizontalSpacingAnchor => ({
+      positionPx: column.basePositionPx,
+      timestamp: column.timestamp,
+    }));
   for (const measure of graphicalMeasures) {
     const baseVariableWidthPx: number = Number.isFinite(measure.minimumStaffEntriesWidth)
       ? Math.max(0, measure.minimumStaffEntriesWidth * unitInPixels)
@@ -1263,15 +1269,18 @@ function attachUnanchoredHarmonyColumns(
             Math.abs(candidate.timestamp - timestamp) <= 0.000001,
         );
         if (!column) {
-          const proportion: number = Math.max(
-            0,
-            Math.min(1, timestamp / measureEnd),
-          );
           column = {
             // minimumStaffEntriesWidth is recalculated from the unmodified
-            // VexFlow voices on every pass. Using it here avoids feeding the
-            // previous selected-system width back into a later rebuild.
-            basePositionPx: baseVariableWidthPx * proportion,
+            // VexFlow voices on every pass. Interpolate between actual
+            // TickContext positions: a simple fraction of this width can put
+            // an offbeat harmony before an earlier note after VexFlow has
+            // distributed its nonuniform rhythmic spacing.
+            basePositionPx: unanchoredHarmonyBasePositionPx(
+              rhythmicAnchors,
+              timestamp,
+              measureEnd,
+              baseVariableWidthPx,
+            ),
             contexts: [],
             harmonies: [],
             hasVisibleRest: false,
@@ -1309,6 +1318,43 @@ function attachUnanchoredHarmonyColumns(
       left.timestamp - right.timestamp ||
       left.basePositionPx - right.basePositionPx,
   );
+}
+
+export interface HorizontalSpacingAnchor {
+  positionPx: number;
+  timestamp: number;
+}
+
+export function unanchoredHarmonyBasePositionPx(
+  rhythmicAnchors: HorizontalSpacingAnchor[],
+  timestamp: number,
+  measureEnd: number,
+  baseVariableWidthPx: number,
+): number {
+  let preceding: HorizontalSpacingAnchor | undefined;
+  let following: HorizontalSpacingAnchor | undefined;
+  for (const anchor of rhythmicAnchors) {
+    if (anchor.timestamp < timestamp &&
+      (!preceding || anchor.timestamp > preceding.timestamp ||
+        (anchor.timestamp === preceding.timestamp && anchor.positionPx > preceding.positionPx))) {
+      preceding = anchor;
+    }
+    if (anchor.timestamp > timestamp &&
+      (!following || anchor.timestamp < following.timestamp ||
+        (anchor.timestamp === following.timestamp && anchor.positionPx < following.positionPx))) {
+      following = anchor;
+    }
+  }
+
+  const leftTime: number = preceding?.timestamp ?? 0;
+  const leftX: number = preceding?.positionPx ?? 0;
+  const rightTime: number = following?.timestamp ?? measureEnd;
+  const rightX: number = following?.positionPx ??
+    Math.max(leftX, baseVariableWidthPx);
+  const fraction: number = rightTime > leftTime
+    ? Math.max(0, Math.min(1, (timestamp - leftTime) / (rightTime - leftTime)))
+    : 0;
+  return leftX + (rightX - leftX) * fraction;
 }
 
 /** Offset from a shared VexFlow timestamp to the rendered notehead column on

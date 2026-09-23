@@ -6,6 +6,8 @@ import {
   VexFlowHorizontalSpacingDiagnostics,
   VexFlowHorizontalSpacingGapDiagnostics,
   VexFlowHorizontalSpacingSystemDiagnostics,
+  HorizontalSpacingAnchor,
+  unanchoredHarmonyBasePositionPx,
 } from "../../../src/MusicalScore/Graphical/VexFlow/VexFlowHorizontalSpacing";
 import { LyricFootprint } from "../../../src/MusicalScore/Graphical/GraphicalLyricEntry";
 import { VexFlowVoiceEntry } from "../../../src/MusicalScore/Graphical/VexFlow/VexFlowVoiceEntry";
@@ -15,6 +17,26 @@ import { TestUtils } from "../../Util/TestUtils";
 import * as VF from "../../../src/MusicalScore/Graphical/VexFlow/VexFlowAdapter";
 
 describe("Horizontal system spacing", (): void => {
+  it("places offbeat harmony between the surrounding rhythmic anchors", (): void => {
+    // A fraction of the nominal 200px measure width would place this 1.25
+    // harmony at 125px, before the earlier note at 140px.
+    const anchors: HorizontalSpacingAnchor[] = [
+      { timestamp: 0, positionPx: 20 },
+      { timestamp: 1, positionPx: 140 },
+      { timestamp: 1.75, positionPx: 185 },
+    ];
+    expect(unanchoredHarmonyBasePositionPx(anchors, 1.25, 2, 200))
+      .to.be.closeTo(155, 0.001);
+    expect(unanchoredHarmonyBasePositionPx(anchors, 1.875, 2, 175))
+      .to.be.at.least(185);
+    expect(unanchoredHarmonyBasePositionPx(
+      [...anchors, { timestamp: 1, positionPx: 145 }],
+      1.25,
+      2,
+      200,
+    )).to.be.closeTo(158.333, 0.001);
+  });
+
   it("does not publish constraints across a selected XML system break", async (): Promise<void> => {
     const osmd: OpenSheetMusicDisplay = createOsmd();
     await osmd.load(twoMeasureSystemBreakScore());
