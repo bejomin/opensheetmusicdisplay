@@ -1363,7 +1363,7 @@ function terminalRestScore(finalBarline: boolean = false): string {
         <duration>2</duration><type>half</type>
       </note>
       <note><rest/><duration>2</duration><type>half</type></note>
-      ${finalBarline ? "<barline location=\"right\"><bar-style>light-heavy</bar-style></barline>" : ""}
+      <barline location="right"><bar-style>${finalBarline ? "light-heavy" : "regular"}</bar-style></barline>
     </measure>
   </part>
 </score-partwise>`;
